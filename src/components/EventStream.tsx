@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { dashboardService } from "@/services/dashboardService";
 import type { AlertPayload } from "@/lib/types";
 
-const severityDot = (severity: string) => {
-  const s = severity.toLowerCase();
+const severityDot = (severity?: string) => {
+  const s = (severity || "").toLowerCase();
   if (s === "critical" || s === "high") return "bg-error";
   if (s === "medium" || s === "warning") return "bg-amber-500";
   if (s === "low" || s === "info") return "bg-emerald-500";
@@ -31,7 +31,8 @@ export function EventStream() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Try SSE connection first
+    loadRecentAlerts();
+    // Establish real-time SSE stream
     const es = dashboardService.getAlertStream();
 
     if (es) {
@@ -39,7 +40,10 @@ export function EventStream() {
       es.onmessage = (event) => {
         try {
           const alert: AlertPayload = JSON.parse(event.data);
-          setEvents((prev) => [alert, ...prev].slice(0, 50));
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === alert?.id)) return prev;
+            return [alert, ...prev].slice(0, 50);
+          });
         } catch {
           // non-JSON keep-alive, ignore
         }
@@ -47,14 +51,9 @@ export function EventStream() {
       es.onerror = () => {
         setConnected(false);
         es.close();
-        // Fallback: load recent alerts via REST
-        loadRecentAlerts();
       };
 
       return () => es.close();
-    } else {
-      // SSR or EventSource unavailable — load via REST
-      loadRecentAlerts();
     }
   }, []);
 
@@ -62,7 +61,8 @@ export function EventStream() {
     dashboardService
       .getAlerts(undefined, 10)
       .then((res) => {
-        setEvents(res.data || []);
+        const raw = res?.data || (Array.isArray(res) ? res : []);
+        setEvents(Array.isArray(raw) ? raw : []);
       })
       .catch((err) => {
         console.error("Failed to load alerts:", err);
@@ -90,9 +90,9 @@ export function EventStream() {
           </p>
         )}
 
-        {events.map((alert) => (
+        {events.map((alert, idx) => (
           <div
-            key={alert.id}
+            key={alert.id || `alert-${idx}`}
             className="flex gap-3 items-start pb-3 border-b border-surface-container-high animate-[fadeIn_0.3s_ease-out]"
           >
             <div
@@ -100,13 +100,13 @@ export function EventStream() {
             />
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-bold font-headline uppercase text-on-surface tracking-tight">
-                {alert.event_type}
+                {alert.event_type || "Security Signal"}
               </p>
               <p className="text-[10px] text-on-surface-variant mt-0.5 truncate">
-                Server: {alert.server_id} — Severity: {alert.severity}
+                Server: {alert.hostname || (alert.details?.host as string) || alert.server_id || "cluster"} — Severity: {alert?.severity || "info"}
               </p>
               <p className="text-[9px] text-primary/40 mt-1 font-mono">
-                {formatTime(alert.detected_at)} | ID: {alert.id.slice(0, 8)}
+                {formatTime(alert.detected_at)} | ID: {typeof alert.id === "string" ? alert?.id?.slice(0, 8) : "—"}
               </p>
             </div>
           </div>

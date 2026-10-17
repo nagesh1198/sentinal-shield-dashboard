@@ -143,20 +143,26 @@ export class StreamingEventSource {
   onopen: ((this: EventSource, ev: Event) => any) | null = null;
   onmessage: ((this: EventSource, ev: MessageEvent) => any) | null = null;
   onerror: ((this: EventSource, ev: Event) => any) | null = null;
-  private controller: AbortController;
+  private controller: AbortController | null = null;
+  private isClosed = false;
+  private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private headers: Record<string, string>;
 
   constructor(url: string, headers: Record<string, string> = {}) {
     this.url = url;
-    this.controller = new AbortController();
-    this.connect(headers);
+    this.headers = headers;
+    this.connect();
   }
 
-  private async connect(headers: Record<string, string>) {
+  private async connect() {
+    if (this.isClosed) return;
+    this.controller = new AbortController();
+
     try {
       const res = await fetch(this.url, {
         headers: {
           Accept: "text/event-stream",
-          ...headers,
+          ...this.headers,
         },
         signal: this.controller.signal,
       });
@@ -193,15 +199,45 @@ export class StreamingEventSource {
           }
         }
       }
+
+      if (!this.isClosed) {
+        this.scheduleReconnect();
+      }
     } catch (err: any) {
-      if (err.name !== "AbortError" && this.onerror) {
-        this.onerror.call(this as any, new Event("error"));
+      if (err.name !== "AbortError") {
+        if (this.onerror) {
+          this.onerror.call(this as any, new Event("error"));
+        }
+        if (!this.isClosed) {
+          this.scheduleReconnect();
+        }
       }
     }
   }
 
+  private scheduleReconnect() {
+    if (this.isClosed || this.retryTimeout) return;
+    this.retryTimeout = setTimeout(() => {
+      this.retryTimeout = null;
+      if (!this.isClosed) {
+        const token = getToken();
+        if (token) {
+          this.headers["Authorization"] = `Bearer ${token}`;
+        }
+        this.connect();
+      }
+    }, 5000);
+  }
+
   close() {
-    this.controller.abort();
+    this.isClosed = true;
+    if (this.retryTimeout) {
+      clearTimeout(this.retryTimeout);
+      this.retryTimeout = null;
+    }
+    if (this.controller) {
+      this.controller.abort();
+    }
   }
 }
 

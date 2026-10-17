@@ -82,6 +82,8 @@ export interface HeatmapCell {
 export interface AlertPayload {
   id: string;
   server_id: string;
+  hostname?: string;
+  host_name?: string;
   event_type: string;
   severity: string;
   details: Record<string, unknown>;

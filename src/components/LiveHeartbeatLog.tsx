@@ -101,7 +101,7 @@ export function LiveHeartbeatLog({
             res.data.slice(0, 5).forEach((alert: AlertPayload) => {
               appendEntry(
                 "ALERT",
-                `[${alert.server_id}] Security event: ${alert.event_type} (${alert.severity.toUpperCase()}) — ${alert.details && typeof alert.details.message === "string"
+                `[${alert.server_id || "cluster"}] Security event: ${alert.event_type || "signal"} (${(alert.severity || "INFO").toUpperCase()}) — ${alert.details && typeof alert.details.message === "string"
                   ? alert.details.message
                   : "Signal registered"
                 }`,
@@ -272,7 +272,7 @@ export function LiveHeartbeatLog({
           if (!nodeId || alert.server_id === nodeId) {
             appendEntry(
               "ALERT",
-              `Real-time alert: ${alert.event_type} [${alert.severity.toUpperCase()}] on server ${alert.server_id}`
+              `Real-time alert: ${alert.event_type || "signal"} [${(alert.severity || "INFO").toUpperCase()}] on server ${alert.server_id || "cluster"}`
             );
           }
         } catch {

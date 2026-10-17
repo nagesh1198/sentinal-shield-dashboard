@@ -5,6 +5,8 @@ if (process.env.NODE_ENV !== "production" || process.env.ALLOW_SELF_SIGNED_CERTS
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
+export const dynamic = "force-dynamic";
+
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://ec2-3-89-18-5.compute-1.amazonaws.com";
 
@@ -119,6 +121,22 @@ async function handleProxy(request: NextRequest, pathSegments: string[]) {
         resHeaders.set(key, value);
       }
     });
+
+    const contentType = res.headers.get("content-type") || "";
+    const isEventStream = contentType.toLowerCase().includes("text/event-stream");
+
+    if (isEventStream && res.body) {
+      resHeaders.set("Content-Type", "text/event-stream");
+      resHeaders.set("Cache-Control", "no-cache, no-transform");
+      resHeaders.set("Connection", "keep-alive");
+      resHeaders.set("X-Accel-Buffering", "no");
+
+      return new Response(res.body as any, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: resHeaders,
+      });
+    }
 
     const resBody = await res.arrayBuffer();
     return new NextResponse(resBody, {
