@@ -112,3 +112,9 @@ body {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Verification progress bar */
+@keyframes progress {
+  from { width: 0%; }
+  to   { width: 100%; }
+}

@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "CADOC Sentinel | Analyst Dashboard",
+  title: "CADOC Sentinel | Admin Dashboard",
   description: "Clinical-grade cybersecurity monitoring and response platform",
 };
 

@@ -1,11 +1,13 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { logout, getDashboardTitle } from "@/lib/auth";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard, BellRing, Radar, FileText,
   Server, Settings, Shield, HelpCircle, LogOut,
-  Flame, Ghost, Footprints, SlidersHorizontal
+  SlidersHorizontal, Bot, KeyRound,
 } from "lucide-react";
 
 const navMain = [
@@ -14,19 +16,23 @@ const navMain = [
   { href: "/detections",     icon: Radar,              label: "Detections" },
   { href: "/logs",           icon: FileText,           label: "Logs" },
   { href: "/infrastructure", icon: Server,             label: "Infrastructure" },
+  { href: "/agents",         icon: Bot,                label: "Agents" },
+  { href: "/keys",           icon: KeyRound,           label: "API Keys" },
   { href: "/automation",     icon: Settings,           label: "Automation" },
   { href: "/admin",          icon: Shield,             label: "Admin" },
   { href: "/settings",       icon: SlidersHorizontal,  label: "Settings" },
 ];
 
-const navDeception = [
-  { href: "/honeytokens",  icon: Flame,      label: "Honeytokens" },
-  { href: "/decoys",       icon: Ghost,      label: "Decoys" },
-  { href: "/breadcrumbs",  icon: Footprints, label: "Breadcrumbs" },
-];
+
 
 export function Sidebar({ isOpen }: { isOpen: boolean }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [dashboardTitle, setDashboardTitle] = useState("Admin Dashboard");
+
+  useEffect(() => {
+    setDashboardTitle(getDashboardTitle());
+  }, []);
 
   const linkClass = (href: string) => {
     const active = pathname === href;
@@ -36,62 +42,57 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
       : `${base} text-on-surface-variant hover:text-primary hover:bg-surface-container-high`;
   };
 
-  const deceptionLinkClass = (href: string) => {
-    const active = pathname === href;
-    const base = `rounded-full py-3 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`;
-    return active
-      ? `${base} bg-amber-500 text-white shadow-lg shadow-amber-500/20`
-      : `${base} text-on-surface-variant hover:text-amber-600 hover:bg-amber-50`;
-  };
+
 
   return (
     <aside
-      className={`fixed left-0 top-0 h-full bg-surface-container-low flex flex-col py-8 z-40 mt-16 rounded-r-xl shadow-[4px_0px_24px_rgba(0,0,0,0.02)] transition-all duration-300 overflow-x-hidden overflow-y-auto ${
+      data-tour="sidebar"
+      className={`fixed left-0 top-16 h-[calc(100vh-64px)] bg-surface-container-low flex flex-col py-6 z-40 rounded-r-xl shadow-[4px_0px_24px_rgba(0,0,0,0.02)] transition-all duration-300 overflow-x-hidden overflow-y-auto ${
         isOpen ? "w-64" : "w-20"
       }`}
     >
       <div className={`mb-6 whitespace-nowrap transition-all duration-300 ${isOpen ? "px-6 opacity-100" : "px-0 opacity-0 hidden"}`}>
         <p className="text-xs font-bold text-primary tracking-widest uppercase mb-1">Clinical Sentinel</p>
-        <p className="text-[10px] text-on-surface-variant uppercase">Archival Access Level 4</p>
+        <p className="text-[10px] text-on-surface-variant uppercase mb-2">Archival Access Level 4</p>
+        <span className="inline-block text-[9px] font-bold text-primary bg-primary/10 border border-primary/20 rounded-md px-1.5 py-0.5 uppercase tracking-wider">
+          {dashboardTitle}
+        </span>
       </div>
 
       <nav className="flex-1 space-y-1">
         {/* Main Nav */}
         {navMain.map(({ href, icon: Icon, label }) => (
-          <Link key={href} href={href} className={linkClass(href)}>
+          <Link
+            key={href}
+            href={href}
+            data-tour={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+            className={linkClass(href)}
+          >
             <Icon className="w-5 h-5 shrink-0" />
             {isOpen && <span className="font-medium text-sm whitespace-nowrap">{label}</span>}
           </Link>
         ))}
 
-        {/* Deception Divider */}
-        <div className={`my-3 transition-all duration-300 ${isOpen ? "mx-6" : "mx-4"}`}>
-          <div className="border-t border-outline-variant/15" />
-          {isOpen && (
-            <p className="text-[9px] font-bold text-amber-600 uppercase tracking-[0.15em] mt-3 mb-1 px-2">
-              Deception Layer
-            </p>
-          )}
-        </div>
 
-        {/* Deception Nav */}
-        {navDeception.map(({ href, icon: Icon, label }) => (
-          <Link key={href} href={href} className={deceptionLinkClass(href)}>
-            <Icon className="w-5 h-5 shrink-0" />
-            {isOpen && <span className="font-medium text-sm whitespace-nowrap">{label}</span>}
-          </Link>
-        ))}
       </nav>
 
       <div className="mt-auto space-y-1">
+
         <a className={`text-on-surface-variant hover:text-primary hover:bg-surface-container-high rounded-full py-2 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`} href="#">
           <HelpCircle className="w-5 h-5 shrink-0" />
           {isOpen && <span className="font-medium text-sm whitespace-nowrap">Support</span>}
         </a>
-        <a className={`text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded-full py-2 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`} href="#">
+        <button 
+          onClick={(e) => {
+            e.preventDefault();
+            logout();
+            router.push("/login");
+          }}
+          className={`w-full text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded-full py-2 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`}
+        >
           <LogOut className="w-5 h-5 shrink-0" />
           {isOpen && <span className="font-medium text-sm whitespace-nowrap">Logout</span>}
-        </a>
+        </button>
       </div>
     </aside>
   );

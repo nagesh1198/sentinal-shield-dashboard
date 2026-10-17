@@ -1,29 +1,124 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Copy, Server, AlertTriangle, Check, RefreshCw } from "lucide-react";
+import {
+  X,
+  Copy,
+  Server,
+  AlertTriangle,
+  Check,
+  RefreshCw,
+  ChevronRight,
+  ChevronLeft,
+  Globe,
+  Shield,
+  Loader2,
+  CheckCircle2,
+  Building,
+} from "lucide-react";
+import { nodeService } from "@/services/nodeService";
+import { projectService } from "@/services/projectService";
+import { serverService } from "@/services/serverService";
+import { adminService } from "@/services/adminService";
+import { usePermissions } from "@/lib/rbac";
+import type { ProjectResponse } from "@/lib/types";
 
 interface AddServerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void; // Optional callback to refresh parent node list on completion
+  initialTenant?: string;
 }
 
-const TOKEN = "cvs.AKm9xR7vQpL2nJsT4wBdF8cYuE6oXhZ3iGmN1rVqP5";
-const INSTALL_CMD = `curl -sfL https://get.cadoc.io/install.sh | sh -s -- --token \\
-  ${TOKEN} --profile honey-web`;
-const REFRESH_CMD = `cadoc-cli refresh --all-nodes --force`;
+const PROFILES = [
+  { id: "honey-web", label: "Honey Web", desc: "HTTP/HTTPS honeypot with deception layer" },
+  { id: "honey-ssh", label: "Honey SSH", desc: "SSH canary with credential trapping" },
+  // { id: "honey-db", label: "Honey DB", desc: "Database decoy with schema monitoring" },
+  { id: "full-sentinel", label: "Full Sentinel", desc: "Complete monitoring + deception suite" },
+];
 
-export function AddServerModal({ isOpen, onClose }: AddServerModalProps) {
-  const [timeLeft, setTimeLeft] = useState(298); // 4:58
+const STEPS = [
+  { num: 1, label: "Configure" },
+  { num: 2, label: "Deploy" },
+  { num: 3, label: "Verify" },
+];
+
+export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: AddServerModalProps) {
+  const [step, setStep] = useState(1);
+  const [timeLeft, setTimeLeft] = useState(300);
   const [copiedInstall, setCopiedInstall] = useState(false);
   const [copiedRefresh, setCopiedRefresh] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [token, setToken] = useState("");
+  const [installCmd, setInstallCmd] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
+  const [form, setForm] = useState({
+    name: "",
+    location: "",
+    ip: "",
+    profile: "honey-web",
+  });
+  const { isPlatformAdmin, user } = usePermissions();
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [newProjectName, setNewProjectName] = useState<string>("");
+  const [tenants, setTenants] = useState<string[]>(["mock-acme"]);
+  const [selectedTenant, setSelectedTenant] = useState<string>(initialTenant || "mock-acme");
+
+  // Reset state when modal opens
   useEffect(() => {
-    if (!isOpen) return;
-    setTimeLeft(298);
+    if (isOpen) {
+      setStep(1);
+      setTimeLeft(300);
+      setGenerating(false);
+      setVerifying(false);
+      setVerified(false);
+      setToken("");
+      setInstallCmd("");
+      setError(null);
+      setForm({ name: "", location: "", ip: "", profile: "honey-web" });
+      if (initialTenant) {
+        setSelectedTenant(initialTenant);
+      }
+
+      if (isPlatformAdmin) {
+        adminService
+          .listClients()
+          .then((res) => {
+            const slugs = Array.isArray(res)
+              ? (res.map((c: any) => c.company_slug || c.slug).filter(Boolean) as string[])
+              : [];
+            if (!slugs.includes("mock-acme")) slugs.unshift("mock-acme");
+            if (initialTenant && !slugs.includes(initialTenant)) slugs.push(initialTenant);
+            setTenants(slugs);
+          })
+          .catch(() => {
+            setTenants(["mock-acme"]);
+          });
+      }
+
+      projectService
+        .listProjects()
+        .then((res) => {
+          const list = Array.isArray(res) ? res : [];
+          setProjects(list);
+          if (list.length > 0) setSelectedProjectId(list[0].id);
+        })
+        .catch(() => {
+          // Continue gracefully
+        });
+    }
+  }, [isOpen, isPlatformAdmin]);
+
+  // Countdown timer for Step 2
+  useEffect(() => {
+    if (!isOpen || step !== 2) return;
     const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(t);
-  }, [isOpen]);
+  }, [isOpen, step]);
 
   if (!isOpen) return null;
 
@@ -31,10 +126,88 @@ export function AddServerModal({ isOpen, onClose }: AddServerModalProps) {
   const secs = String(timeLeft % 60).padStart(2, "0");
   const isExpiring = timeLeft < 60;
 
+  const refreshCmd = `cadoc-cli refresh --all-nodes --force`;
+  const canAdvanceStep1 = form.name.trim() && form.location.trim() && form.ip.trim();
+
   function copy(text: string, setter: (v: boolean) => void) {
     navigator.clipboard.writeText(text);
     setter(true);
     setTimeout(() => setter(false), 2000);
+  }
+
+  const handleGenerateToken = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      let targetProjectId = selectedProjectId;
+      if (!targetProjectId && newProjectName.trim()) {
+        try {
+          const createdProj = await projectService.createProject({
+            name: newProjectName.trim(),
+            company_slug: isPlatformAdmin ? selectedTenant : (user?.companySlug || undefined),
+          });
+          targetProjectId = createdProj.id;
+        } catch {
+          // ignore project creation error
+        }
+      }
+
+      let createdServerId: string | null = null;
+      if (targetProjectId) {
+        try {
+          const s = await serverService.createServer({
+            project_id: targetProjectId,
+            hostname: form.name.trim(),
+            ip_address: form.ip.trim(),
+            status: "provisioning",
+            specs: { location: form.location.trim(), profile: form.profile },
+            company_slug: isPlatformAdmin ? selectedTenant : (user?.companySlug || undefined),
+          });
+          if (s?.id) createdServerId = s.id;
+        } catch (e: any) {
+          console.warn("Server creation notice:", e.message);
+        }
+      }
+
+      const res = await nodeService.generateToken(createdServerId || form.name);
+      setToken(res.token);
+      setInstallCmd(res.install_command);
+
+      // Calculate remaining seconds securely
+      const expiresMs = res.expires_at > 10000000000 ? res.expires_at : res.expires_at * 1000;
+      const secsLeft = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000));
+      setTimeLeft(secsLeft > 0 ? secsLeft : 300);
+
+      setStep(2);
+    } catch (err: any) {
+      console.error("Token generation failed:", err);
+      setError(err.message || "Failed to generate deployment token. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await nodeService.verifyServer(form.name);
+      if (res.verified) {
+        setVerified(true);
+      } else {
+        setError(`Agent not reporting yet. Status: ${res.status || "offline"}. Make sure the script was run.`);
+      }
+    } catch (err: any) {
+      console.error("Verification failed:", err);
+      setError(err.message || "Connection verification failed.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  function handleFinish() {
+    if (onSuccess) onSuccess();
+    onClose();
   }
 
   return (
@@ -42,7 +215,7 @@ export function AddServerModal({ isOpen, onClose }: AddServerModalProps) {
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-[fadeUp_0.2s_ease]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-[fadeUp_0.2s_ease] border border-outline-variant/10">
         {/* Header */}
         <div className="flex items-start justify-between px-6 pt-6 pb-4">
           <div className="flex items-center gap-3">
@@ -51,7 +224,9 @@ export function AddServerModal({ isOpen, onClose }: AddServerModalProps) {
             </div>
             <div>
               <h2 className="text-base font-bold text-on-surface">Add New Server</h2>
-              <p className="text-xs text-on-surface-variant">Step 2: Deploy Tactical Sentinel</p>
+              <p className="text-xs text-on-surface-variant">
+                Step {step}: {step === 1 ? "Configure Server" : step === 2 ? "Deploy Tactical Sentinel" : "Verify Deployment"}
+              </p>
             </div>
           </div>
           <button
@@ -62,93 +237,405 @@ export function AddServerModal({ isOpen, onClose }: AddServerModalProps) {
           </button>
         </div>
 
-        <div className="px-6 space-y-4 pb-6">
-          {/* Token Row */}
-          <div className="bg-surface-container-low rounded-xl px-4 py-3 flex items-center justify-between border border-outline-variant/10">
+        {/* Stepper */}
+        <div className="px-6 pb-5">
+          <div className="flex items-center justify-between">
+            {STEPS.map((s, i) => (
+              <div key={s.num} className="flex items-center flex-1 last:flex-none">
+                {/* Step circle + label */}
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${step > s.num
+                        ? "bg-emerald-500 text-white"
+                        : step === s.num
+                          ? "bg-primary text-white shadow-lg shadow-primary/30"
+                          : "bg-surface-container-high text-on-surface-variant"
+                      }`}
+                  >
+                    {step > s.num ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      s.num
+                    )}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold transition-colors ${step >= s.num ? "text-on-surface" : "text-on-surface-variant/50"
+                      }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+                {/* Connector line */}
+                {i < STEPS.length - 1 && (
+                  <div className="flex-1 mx-3 h-[2px] rounded-full overflow-hidden bg-surface-container-high">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                      style={{ width: step > s.num ? "100%" : "0%" }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Dynamic Error Banner */}
+        {error && (
+          <div className="mx-6 mb-4 flex gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <p className="text-xs text-red-800 font-medium">{error}</p>
+          </div>
+        )}
+
+        {/* Step Content */}
+        <div className="px-6 pb-6 space-y-4">
+
+          {/* STEP 1: Configure */}
+          {step === 1 && (
+            <>
+              {isPlatformAdmin && (
+                <div className="bg-primary/5 p-3 rounded-xl border border-primary/20">
+                  <label className="text-[10px] font-bold text-primary uppercase tracking-widest block mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Building className="w-3.5 h-3.5 text-primary" />
+                      Target Client Tenant (Organization)
+                    </span>
+                    <span className="text-[9px] text-primary/70 font-mono font-normal">Cross-Tenant Superadmin</span>
+                  </label>
+                  <select
+                    value={selectedTenant}
+                    onChange={(e) => setSelectedTenant(e.target.value)}
+                    className="w-full bg-white border border-primary/20 rounded-xl px-3.5 py-2 text-sm font-semibold text-on-surface outline-none focus:border-primary transition-colors"
+                  >
+                    {tenants.map((slug) => (
+                      <option key={slug} value={slug}>
+                        {slug} (client_{slug})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1.5">
+                    Server registration and Brokered Join Token will be provisioned directly into this tenant&apos;s isolated database schema.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
+                  Target Project
+                </label>
+                {projects.length > 0 ? (
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface outline-none focus:border-primary/40 transition-colors"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="e.g. Production Cluster (Project name)"
+                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
+                  Server ID (Hostname)
+                </label>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. SENTINEL-NODE-05"
+                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
+                  Location
+                </label>
+                <div className="relative">
+                  <Globe className="absolute left-3.5 top-3 w-4 h-4 text-on-surface-variant/40 pointer-events-none" />
+                  <input
+                    value={form.location}
+                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                    placeholder="e.g. Tokyo, JP"
+                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl pl-10 pr-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
+                  IP Address
+                </label>
+                <input
+                  value={form.ip}
+                  onChange={(e) => setForm((f) => ({ ...f, ip: e.target.value }))}
+                  placeholder="e.g. 10.20.1.45"
+                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm font-mono text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
+                  Deployment Profile
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PROFILES.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setForm((f) => ({ ...f, profile: p.id }))}
+                      className={`text-left p-3 rounded-xl border transition-all ${form.profile === p.id
+                          ? "border-primary bg-primary/5 shadow-sm"
+                          : "border-outline-variant/20 hover:bg-surface-container-low"
+                        }`}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <Shield className={`w-3.5 h-3.5 ${form.profile === p.id ? "text-primary" : "text-on-surface-variant"}`} />
+                        <span className={`text-xs font-bold ${form.profile === p.id ? "text-primary" : "text-on-surface"}`}>
+                          {p.label}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-on-surface-variant leading-snug">{p.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* STEP 2: Deploy */}
+          {step === 2 && (
+            <>
+              {/* Token Row */}
+              <div className="bg-surface-container-low rounded-xl px-4 py-3 flex items-center justify-between border border-outline-variant/10">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">
+                    Temporary Join Token
+                  </p>
+                  <p className="text-xs font-mono text-primary font-semibold break-all">{token}</p>
+                </div>
+                <div className="text-right shrink-0 ml-4">
+                  <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Expires In</p>
+                  <p className={`text-base font-bold font-mono ${isExpiring ? "text-error" : "text-primary"}`}>
+                    {mins}:{secs}
+                  </p>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <div className="flex gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">
+                  Deployment tokens are single-use. If the installation fails or times out, you must restart and generate a new token.
+                </p>
+              </div>
+
+              {/* Automated Install */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-xs font-semibold text-on-surface">Automated Install (Recommended)</p>
+                  <button
+                    onClick={() => copy(installCmd, setCopiedInstall)}
+                    className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary-container transition-colors"
+                  >
+                    {copiedInstall ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedInstall ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+                <div className="bg-[#0e1117] rounded-xl px-4 py-3">
+                  <pre className="text-xs font-mono text-emerald-400 whitespace-pre-wrap break-all leading-5 select-all">{installCmd}</pre>
+                </div>
+              </div>
+
+              {/* Refresh Canary */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-xs font-semibold text-on-surface">Refresh Canary Assets</p>
+                  <button
+                    onClick={() => copy(refreshCmd, setCopiedRefresh)}
+                    className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary-container transition-colors"
+                  >
+                    {copiedRefresh ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedRefresh ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+                <div className="bg-[#0e1117] rounded-xl px-4 py-3">
+                  <pre className="text-xs font-mono text-emerald-400 select-all">{refreshCmd}</pre>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* STEP 3: Verify */}
+          {step === 3 && (
+            <>
+              {!verified ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-4">
+                  {verifying ? (
+                    <>
+                      <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-bold text-on-surface mb-1">Verifying Deployment...</p>
+                        <p className="text-xs text-on-surface-variant">
+                          Checking node connectivity and sentinel agent status
+                        </p>
+                      </div>
+                      <div className="w-48 h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+                        <div className="h-full bg-primary rounded-full animate-[progress_2.5s_ease-in-out]" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+                        <RefreshCw className="w-8 h-8 text-primary" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-bold text-on-surface mb-1">Ready to Verify</p>
+                        <p className="text-xs text-on-surface-variant max-w-xs">
+                          Run the install command on your server, then click below to verify the agent connected successfully.
+                        </p>
+                      </div>
+
+                      {/* Server summary */}
+                      <div className="w-full bg-surface-container-low rounded-xl p-4 border border-outline-variant/10 space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-on-surface-variant">Server Hostname</span>
+                          <span className="font-bold text-on-surface font-mono">{form.name || "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-on-surface-variant">Location</span>
+                          <span className="font-medium text-on-surface">{form.location || "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-on-surface-variant">IP Address</span>
+                          <span className="font-mono text-on-surface">{form.ip || "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-on-surface-variant">Profile</span>
+                          <span className="font-medium text-on-surface">
+                            {PROFILES.find((p) => p.id === form.profile)?.label}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleVerify}
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold bg-primary text-white hover:bg-primary-container transition-colors shadow-lg shadow-primary/20 cursor-pointer"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Verify Deployment
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 gap-4">
+                  <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-on-surface mb-1">Deployment Verified!</p>
+                    <p className="text-xs text-on-surface-variant">
+                      Sentinel agent is running and reporting to the cluster.
+                    </p>
+                  </div>
+
+                  {/* Verified info card */}
+                  <div className="w-full bg-emerald-50 rounded-xl p-4 border border-emerald-200 space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Node ID</span>
+                      <span className="font-bold text-emerald-800 font-mono">{form.name}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Location</span>
+                      <span className="font-medium text-emerald-800">{form.location}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Status</span>
+                      <span className="font-bold text-emerald-600 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Online
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Agent Version</span>
+                      <span className="font-mono text-emerald-800">v4.2.1</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Footer Actions */}
+          <div className="flex justify-between items-center pt-2">
             <div>
-              <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">
-                Temporary Join Token
-              </p>
-              <p className="text-xs font-mono text-primary font-semibold break-all">{TOKEN}</p>
+              {step > 1 && !verified && (
+                <button
+                  onClick={() => setStep((s) => s - 1)}
+                  className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Back
+                </button>
+              )}
             </div>
-            <div className="text-right shrink-0 ml-4">
-              <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Expires In</p>
-              <p className={`text-base font-bold font-mono ${isExpiring ? "text-error" : "text-primary"}`}>
-                {mins}:{secs}
-              </p>
-            </div>
-          </div>
-
-          {/* Warning */}
-          <div className="flex gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-800">
-              Deployment tokens are single-use and expire after 5 minutes. If the installation fails or times out,
-              you must generate a new token to resume.
-            </p>
-          </div>
-
-          {/* Automated Install */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-semibold text-on-surface">Automated Install (Recommended)</p>
+            <div className="flex gap-3">
               <button
-                onClick={() => copy(INSTALL_CMD, setCopiedInstall)}
-                className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary-container transition-colors"
+                onClick={onClose}
+                className="px-5 py-2.5 rounded-full text-sm font-medium text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer"
               >
-                {copiedInstall ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedInstall ? "Copied!" : "Copy"}
+                Cancel
               </button>
+              {step === 1 && (
+                <button
+                  onClick={handleGenerateToken}
+                  disabled={!canAdvanceStep1 || generating}
+                  className="flex items-center gap-1.5 px-6 py-2.5 rounded-full text-sm font-bold bg-primary text-white hover:bg-primary-container transition-colors shadow-lg shadow-primary/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      Generate Token
+                      <ChevronRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              )}
+              {step === 2 && (
+                <button
+                  onClick={() => setStep(3)}
+                  className="flex items-center gap-1.5 px-6 py-2.5 rounded-full text-sm font-bold bg-primary text-white hover:bg-primary-container transition-colors shadow-lg shadow-primary/20 cursor-pointer"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              )}
+              {step === 3 && verified && (
+                <button
+                  onClick={handleFinish}
+                  className="flex items-center gap-1.5 px-6 py-2.5 rounded-full text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Done
+                </button>
+              )}
             </div>
-            <div className="bg-[#0e1117] rounded-xl px-4 py-3">
-              <pre className="text-xs font-mono text-emerald-400 whitespace-pre-wrap break-all leading-5">{INSTALL_CMD}</pre>
-            </div>
-          </div>
-
-          {/* Redeploy */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-semibold text-on-surface">Redeploy Sentinel</p>
-              <button className="text-[9px] font-bold text-on-surface-variant border border-outline-variant/30 px-2.5 py-1 rounded-full hover:bg-surface-container-high transition-colors uppercase tracking-widest">
-                Generate Redeploy Token
-              </button>
-            </div>
-            <input
-              className="w-full bg-surface-container-low border border-outline-variant/10 rounded-xl px-4 py-2.5 text-xs font-mono text-on-surface-variant placeholder:text-on-surface-variant/40 outline-none focus:border-primary/30 transition-colors"
-              placeholder="# Token required to run redeploy command..."
-              readOnly
-            />
-          </div>
-
-          {/* Refresh Canary */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-semibold text-on-surface">Refresh Canary Assets</p>
-              <button
-                onClick={() => copy(REFRESH_CMD, setCopiedRefresh)}
-                className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary-container transition-colors"
-              >
-                {copiedRefresh ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedRefresh ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <div className="bg-[#0e1117] rounded-xl px-4 py-3">
-              <pre className="text-xs font-mono text-emerald-400">{REFRESH_CMD}</pre>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={onClose}
-              className="px-5 py-2.5 rounded-full text-sm font-medium text-on-surface-variant hover:bg-surface-container-high transition-colors"
-            >
-              Cancel
-            </button>
-            <button className="px-6 py-2.5 rounded-full text-sm font-bold bg-primary text-white hover:bg-primary-container transition-colors shadow-lg shadow-primary/20 flex items-center gap-2">
-              <RefreshCw className="w-4 h-4" />
-              Verify Deployment
-            </button>
           </div>
         </div>
       </div>

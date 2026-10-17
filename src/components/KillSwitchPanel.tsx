@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ShieldCheck, ShieldAlert, ChevronDown, ChevronUp, Clock, AlertTriangle, Lock, CheckSquare, Square, Zap } from "lucide-react";
+import { usePermissions } from "@/lib/rbac";
 
 const CHECKLIST = [
   { id: 1, label: "Verify internal traffic rerouting protocols are synced", tag: "MANDATORY" },
@@ -28,6 +29,9 @@ const REASONS = [
 ];
 
 export function KillSwitchPanel() {
+  const { can, role } = usePermissions();
+  const canRespond = can("security.respond");
+
   const [checked, setChecked] = useState<number[]>([]);
   const [selectedLevel, setSelectedLevel] = useState(2);
   const [reason, setReason] = useState(REASONS[0]);
@@ -44,6 +48,10 @@ export function KillSwitchPanel() {
   }
 
   function handleActivate() {
+    if (!canRespond) {
+      alert(`Access Denied: Role '${role}' lacks 'security.respond' permission.`);
+      return;
+    }
     if (!allChecked || !authorizedBy) return;
     setConfirming(true);
   }
@@ -229,15 +237,24 @@ export function KillSwitchPanel() {
             </div>
 
             {/* Activate Button */}
-            <button
-              onClick={handleActivate}
-              disabled={!allChecked || !authorizedBy}
-              className="w-full py-3 rounded-xl bg-error text-white text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-700 active:scale-[0.98] transition-all shadow-lg shadow-error/30 disabled:opacity-40 disabled:cursor-not-allowed mt-auto"
-            >
-              <Zap className="w-4 h-4" /> Activate Kill Switch
-            </button>
+            {!canRespond ? (
+              <div
+                title={`Role '${role}' cannot trigger emergency network purge (requires security.respond)`}
+                className="w-full py-3 rounded-xl bg-surface-container-high text-on-surface-variant/40 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 border border-outline-variant/20 cursor-not-allowed mt-auto"
+              >
+                <Lock className="w-4 h-4 text-on-surface-variant/40" /> Locked: Requires security.respond
+              </div>
+            ) : (
+              <button
+                onClick={handleActivate}
+                disabled={!allChecked || !authorizedBy}
+                className="w-full py-3 rounded-xl bg-error text-white text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-700 active:scale-[0.98] transition-all shadow-lg shadow-error/30 disabled:opacity-40 disabled:cursor-not-allowed mt-auto"
+              >
+                <Zap className="w-4 h-4" /> Activate Kill Switch
+              </button>
+            )}
 
-            {!allChecked && (
+            {canRespond && !allChecked && (
               <p className="text-[9px] text-on-surface-variant/50 text-center -mt-2">Complete all checklist items to proceed</p>
             )}
           </div>
