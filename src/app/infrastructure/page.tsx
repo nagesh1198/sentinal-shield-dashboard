@@ -190,7 +190,19 @@ export default function InfrastructurePage() {
                 s.hostname?.toLowerCase() === n.id.toLowerCase() ||
                 (s.ip_address && n.ip && s.ip_address === n.ip)
             );
-            const hostname = matchingServer?.hostname || n.hostname || n.id;
+            const hostname =
+              n.hostname ||
+              n.host_name ||
+              n.host ||
+              n.name ||
+              n.server_hostname ||
+              matchingServer?.hostname ||
+              n.id;
+            const serverId =
+              n.server_id ||
+              n.serverId ||
+              matchingServer?.id ||
+              n.id;
 
             return (
               <div key={n.id} className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group">
@@ -204,13 +216,26 @@ export default function InfrastructurePage() {
                       <h3 className="text-sm font-bold text-on-surface leading-tight">
                         {hostname}
                       </h3>
-                      <p className="text-[11px] font-mono font-semibold text-primary mt-0.5">
-                        {n.id}
-                      </p>
+                      <div className="flex items-center gap-1.5 font-mono text-[11px] text-primary mt-0.5">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/70 font-sans">
+                          Server ID:
+                        </span>
+                        <span className="font-bold select-all break-all">
+                          {serverId}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-on-surface-variant flex items-center gap-1.5 mt-1">
                         <span>{n.location || "Cluster Node"}</span>
                         <span>•</span>
                         <span className="font-mono">{n.ip}</span>
+                        {n.memoryTotal !== null && n.memoryUsed !== null && (
+                          <>
+                            <span>•</span>
+                            <span className="font-mono font-medium text-primary">
+                              {n.memoryUsed}/{n.memoryTotal} GB RAM
+                            </span>
+                          </>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -232,11 +257,27 @@ export default function InfrastructurePage() {
                     <Bar value={cpuVal} color={cpuVal > 70 ? "bg-error" : "bg-primary"} />
                   </div>
                   <div>
-                    <div className="flex justify-between text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">
-                      <span className="flex items-center gap-1"><MemoryStick className="w-3 h-3" /> Memory</span>
-                      <span className={memVal > 80 ? "text-error font-bold" : ""}>{memVal}%</span>
+                    <div className="flex justify-between items-center text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">
+                      <span className="flex items-center gap-1"><MemoryStick className="w-3 h-3 text-primary" /> Memory</span>
+                      <div className="flex items-center gap-1.5 font-mono">
+                        {n.memoryUsed !== null && n.memoryTotal !== null && (
+                          <span className="text-[10px] text-on-surface font-semibold lowercase">
+                            {n.memoryUsed} / {n.memoryTotal} GB
+                          </span>
+                        )}
+                        <span className={`text-[10px] ${memVal > 80 ? "text-error font-bold" : "text-primary font-bold"}`}>
+                          ({memVal}%)
+                        </span>
+                      </div>
                     </div>
                     <Bar value={memVal} color={memVal > 80 ? "bg-amber-500" : "bg-primary-container"} />
+                    {n.memoryUsed !== null && n.memoryTotal !== null && (
+                      <div className="flex justify-between items-center text-[9px] text-on-surface-variant/70 font-mono mt-1">
+                        <span>Used: <strong className="text-on-surface">{n.memoryUsed} GB</strong></span>
+                        <span>Total: <strong className="text-on-surface">{n.memoryTotal} GB</strong></span>
+                        <span>Free: <strong className="text-emerald-600">{(Math.max(0, n.memoryTotal - n.memoryUsed)).toFixed(2)} GB</strong></span>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="flex justify-between text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">

@@ -4,6 +4,8 @@ export {
   getSessionUser,
   setDemoSession,
   logout,
+  resolveUserRole,
+  normalizeRole,
 } from "@/services/authService";
 
 export type { UserSession } from "@/services/authService";
@@ -13,6 +15,22 @@ export { hasPermission, getRolePermissions, usePermissions } from "@/lib/rbac";
 
 export function getDashboardTitle(): string {
   if (typeof window === "undefined") return "Admin Dashboard";
+  const userRaw = localStorage.getItem("sentinel_user");
+  if (userRaw) {
+    try {
+      const u = JSON.parse(userRaw);
+      if (u.role === "platform_owner") return "Global Admin Dashboard";
+      if (u.role === "tenant-admin") {
+        return u.companySlug && u.companySlug !== "global"
+          ? `${u.companySlug.toUpperCase()} Security Console`
+          : "Admin Dashboard";
+      }
+      if (u.role === "security-analyst") return "Analyst Dashboard";
+      if (u.role === "read-only") return "Auditor Dashboard";
+    } catch {
+      // ignore JSON parse
+    }
+  }
   const token = localStorage.getItem("auth_token");
   if (!token) return "Admin Dashboard";
   try {
@@ -29,15 +47,6 @@ export function getDashboardTitle(): string {
     }
     return "Analyst Dashboard";
   } catch {
-    const userRaw = localStorage.getItem("sentinel_user");
-    if (userRaw) {
-      try {
-        const u = JSON.parse(userRaw);
-        if (u.companySlug) return `${u.companySlug.toUpperCase()} Security Console`;
-      } catch {
-        // ignore JSON parse
-      }
-    }
     return "Admin Dashboard";
   }
 }

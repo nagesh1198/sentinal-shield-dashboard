@@ -20,25 +20,68 @@ export interface UserSession {
 }
 
 /**
- * Resolves the role for a user given their token payload or known persona definition.
+ * Normalizes an arbitrary role string from the login API or JWT into a canonical UserRole.
  */
-function resolveUserRole(
+export function normalizeRole(roleStr: unknown): UserRole | null {
+  if (typeof roleStr !== "string") return null;
+  const r = roleStr.trim().toLowerCase();
+  if (r in ROLE_PERMISSIONS) return r as UserRole;
+  if (r.includes("platform") || r.includes("owner") || r.includes("superadmin") || r.includes("global")) {
+    return "platform_owner";
+  }
+  if (r.includes("admin")) {
+    return "tenant-admin";
+  }
+  if (r.includes("analyst") || r.includes("operator")) {
+    return "security-analyst";
+  }
+  if (r.includes("read") || r.includes("viewer") || r.includes("audit") || r.includes("readonly")) {
+    return "read-only";
+  }
+  return null;
+}
+
+/**
+ * Resolves the role for a user given their login API response, token payload, or known persona definition.
+ * Prioritizes the role returned by the login API.
+ */
+export function resolveUserRole(
   email: string,
   slug: string,
-  payload?: Record<string, unknown>
+  payload?: Record<string, unknown>,
+  apiResponse?: TokenResponse
 ): UserRole {
-  if (payload?.role && typeof payload.role === "string") {
-    console.log(payload)
-    const r = payload.role.toLowerCase();
-    if (r in ROLE_PERMISSIONS) return r as UserRole;
-    if (r.includes("platform") || r.includes("owner")) return "platform_owner";
-    if (r.includes("admin")) return "tenant-admin";
-    if (r.includes("analyst")) return "security-analyst";
-    if (r.includes("read") || r.includes("viewer")) return "read-only";
+  // 1. Direct role from Login API response body (role, roles array, or user.role)
+  const directApiRole =
+    apiResponse?.role ||
+    (Array.isArray(apiResponse?.roles) ? apiResponse?.roles[0] : undefined) ||
+    apiResponse?.user?.role ||
+    (Array.isArray(apiResponse?.user?.roles) ? apiResponse?.user?.roles[0] : undefined);
+
+  const normalizedFromApi = normalizeRole(directApiRole);
+  if (normalizedFromApi) {
+    return normalizedFromApi;
   }
+
+  // 2. Role from decoded JWT token payload
+  const jwtRole =
+    payload?.role ||
+    (Array.isArray(payload?.roles) ? payload?.roles[0] : undefined) ||
+    payload?.role_name ||
+    payload?.user_role ||
+    (payload?.realm_access as any)?.roles?.[0];
+
+  const normalizedFromJwt = normalizeRole(jwtRole);
+  if (normalizedFromJwt) {
+    return normalizedFromJwt;
+  }
+
+  // 3. Fallback to Known Personas definition if email is explicitly registered
   if (KNOWN_PERSONAS[email]) {
     return KNOWN_PERSONAS[email].role;
   }
+
+  // 4. Fallback based on tenant scope or email heuristics
   if (slug === "global" && (email === "admin@cadoc.io" || email.toLowerCase().includes("admin"))) {
     return "platform_owner";
   }
@@ -50,7 +93,7 @@ function resolveUserRole(
 
 /**
  * Authenticates against POST /api/v1/auth/login
- * Stores token + session info in localStorage.
+ * Stores token + session info in localStorage, capturing the role from the login API response.
  */
 export async function loginUser(
   email: string,
@@ -76,10 +119,14 @@ export async function loginUser(
     // ignore decode errors
   }
 
-  const role = resolveUserRole(email, slug, payload);
-  if (KNOWN_PERSONAS[email]?.displayName && !payload.name) {
+  if (data.user?.display_name || data.user?.name) {
+    displayName = data.user.display_name || data.user.name || displayName;
+  } else if (KNOWN_PERSONAS[email]?.displayName && !payload.name) {
     displayName = KNOWN_PERSONAS[email].displayName;
   }
+
+  // Prioritize role coming from the login API response
+  const role = resolveUserRole(email, slug, payload, data);
   const permissions = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS["read-only"];
 
   // Persist session
@@ -161,10 +208,9 @@ export function getSessionUser(): UserSession | null {
     try {
       const user = JSON.parse(raw);
       if (user && user.role) {
-        const expectedRole = resolveUserRole(user.email || "", user.companySlug || "mock-acme", { role: user.role });
-        if (expectedRole !== user.role && expectedRole === "tenant-admin") {
-          user.role = expectedRole;
-        }
+        // Strictly honor role set from login API response
+        const normalized = normalizeRole(user.role) || (user.role as UserRole);
+        user.role = normalized;
         const defaultPerms = ROLE_PERMISSIONS[user.role as UserRole] || ROLE_PERMISSIONS["read-only"];
         user.permissions = Array.from(new Set([...(user.permissions || []), ...defaultPerms]));
         return user;

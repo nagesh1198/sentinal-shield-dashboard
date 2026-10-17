@@ -11,6 +11,16 @@ export interface LoginRequest {
 export interface TokenResponse {
   access_token: string;
   token_type: string;
+  role?: string | null;
+  roles?: string[] | null;
+  user?: {
+    id?: string;
+    email?: string;
+    name?: string;
+    display_name?: string;
+    role?: string | null;
+    roles?: string[] | null;
+  } | null;
 }
 
 // ─── Projects ───
@@ -92,6 +102,12 @@ export interface MitigatePayload {
 export interface NodeInventory {
   id: string;
   hostname?: string;
+  host_name?: string;
+  host?: string;
+  name?: string;
+  server_hostname?: string;
+  server_id?: string;
+  serverId?: string;
   location: string;
   ip: string;
   status: string;
