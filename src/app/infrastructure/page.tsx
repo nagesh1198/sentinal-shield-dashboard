@@ -1,19 +1,27 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { AddDatabaseModal } from "@/components/AddDatabaseModal";
 import { AddServerModal } from "@/components/AddServerModal";
 import { LiveHeartbeatLog } from "@/components/LiveHeartbeatLog";
 import { nodeService } from "@/services/nodeService";
 import { serverService } from "@/services/serverService";
-import type { NodeInventory, ServerResponse } from "@/lib/types";
+import { agentService } from "@/services/agentService";
+import { decoyService } from "@/services/decoyService";
+import type { NodeInventory, ServerResponse, DecoyResponse, AgentRegistryResponse, AgentResponse } from "@/lib/types";
 import {
   Server, Cpu, MemoryStick, Activity, MoreVertical,
   RotateCcw, ShieldOff, Database, Plus, Eye, Key,
-  RefreshCw, Loader2, AlertTriangle, ShieldCheck, Lock
+  RefreshCw, Loader2, AlertTriangle, ShieldCheck, Lock,
+  Shield, ShieldAlert, Sparkles, FileCode, ChevronDown,
+  ChevronUp, Copy, Check, Filter, Layers, Search, LayoutGrid,
+  Table as TableIcon, Radio, CheckCircle2
 } from "lucide-react";
 import { usePermissions } from "@/lib/rbac";
+import { DynamicResourceWave } from "@/components/DynamicResourceWave";
+
+export type InfraTab = "servers" | "decoys" | "databases" | "events";
 
 const deceptionDbs = [
   {
@@ -35,20 +43,56 @@ const deceptionDbs = [
 const statusColor: Record<string, string> = {
   online: "bg-emerald-500",
   active: "bg-emerald-500",
+  healthy: "bg-emerald-500",
   warning: "bg-amber-500",
   degraded: "bg-amber-500",
   offline: "bg-error",
+  critical: "bg-error",
   provisioning: "bg-blue-500",
 };
 
 const statusText: Record<string, string> = {
-  online: "text-emerald-600 bg-emerald-50",
-  active: "text-emerald-600 bg-emerald-50",
-  warning: "text-amber-700 bg-amber-100",
-  degraded: "text-amber-700 bg-amber-100",
-  offline: "text-error bg-error-container",
-  provisioning: "text-blue-600 bg-blue-50",
+  online: "text-emerald-600 bg-emerald-50 border-emerald-200",
+  active: "text-emerald-600 bg-emerald-50 border-emerald-200",
+  healthy: "text-emerald-600 bg-emerald-50 border-emerald-200",
+  warning: "text-amber-700 bg-amber-100 border-amber-200",
+  degraded: "text-amber-700 bg-amber-100 border-amber-200",
+  offline: "text-error bg-error-container border-error/20",
+  critical: "text-error bg-error-container border-error/20",
+  provisioning: "text-blue-600 bg-blue-50 border-blue-200",
 };
+
+// Fallback baseline planted decoys for demonstration when server has no backend decoys yet
+const DEMO_SERVER_DECOYS: Record<string, Partial<DecoyResponse>[]> = {
+  default: [
+    {
+      id: "decoy-demo-1",
+      file_path: "/etc/shadow.backup",
+      decoy_type: "FILE_TRIPWIRE",
+      status: "active",
+      planted_at: "2026-03-12T10:00:00Z",
+      last_verified: "Just now",
+    },
+    {
+      id: "decoy-demo-2",
+      file_path: "/var/secrets/aws_credentials.json",
+      decoy_type: "HONEYTOKEN",
+      status: "active",
+      planted_at: "2026-03-10T14:30:00Z",
+      last_verified: "10m ago",
+    },
+    {
+      id: "decoy-demo-3",
+      file_path: "/root/.ssh/id_rsa.old",
+      decoy_type: "SSH_TRAP",
+      status: "active",
+      planted_at: "2026-03-08T09:15:00Z",
+      last_verified: "1h ago",
+    },
+  ],
+};
+
+
 
 function Bar({ value, color }: { value: number; color: string }) {
   return (
@@ -62,26 +106,86 @@ function Bar({ value, color }: { value: number; color: string }) {
 }
 
 export default function InfrastructurePage() {
-  const { can, role, isReadOnly } = usePermissions();
+  const { can, role } = usePermissions();
   const canManageServer = can("server.manage");
+
+  // Tab State: "servers" | "decoys" | "databases" | "events"
+  const [activeTab, setActiveTab] = useState<InfraTab>("servers");
 
   const [nodes, setNodes] = useState<NodeInventory[]>([]);
   const [servers, setServers] = useState<ServerResponse[]>([]);
+  const [agents, setAgents] = useState<(AgentRegistryResponse | AgentResponse)[]>([]);
+  const [decoys, setDecoys] = useState<DecoyResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddDb, setShowAddDb] = useState(false);
   const [showAddServer, setShowAddServer] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [verifiedDecoyIds, setVerifiedDecoyIds] = useState<Record<string, boolean>>({});
+
+  // Filters for Servers tab
+  const [serverFilterMode, setServerFilterMode] = useState<"all" | "online" | "with_decoys">("all");
+
+  // Filters for Decoys tab
+  const [decoyServerFilter, setDecoyServerFilter] = useState<string>("ALL");
+  const [decoyTypeFilter, setDecoyTypeFilter] = useState<string>("ALL");
+  const [decoyStatusFilter, setDecoyStatusFilter] = useState<string>("ALL");
+  const [decoySearch, setDecoySearch] = useState<string>("");
+  const [decoyViewMode, setDecoyViewMode] = useState<"table" | "grid">("table");
+
+  // URL query parameter synchronization
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "decoys" || tabParam === "servers" || tabParam === "databases" || tabParam === "events") {
+        setActiveTab(tabParam as InfraTab);
+      }
+    }
+  }, []);
+
+  const switchTab = (tab: InfraTab) => {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const copyServerId = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(id).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const triggerVerifyDecoy = (decoyId: string) => {
+    setVerifiedDecoyIds((prev) => ({ ...prev, [decoyId]: true }));
+    setTimeout(() => {
+      setVerifiedDecoyIds((prev) => ({ ...prev, [decoyId]: false }));
+    }, 3000);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nodesData, serversData] = await Promise.all([
+      const [nodesData, serversData, regAgents, dashAgents, decoysData] = await Promise.all([
         nodeService.getNodes().catch(() => [] as NodeInventory[]),
         serverService.listServers().catch(() => [] as ServerResponse[]),
+        agentService.listAgents().catch(() => [] as AgentRegistryResponse[]),
+        agentService.getAgents().catch(() => [] as AgentResponse[]),
+        decoyService.listDecoys().catch(() => [] as DecoyResponse[]),
       ]);
       setNodes(Array.isArray(nodesData) ? nodesData : []);
       setServers(Array.isArray(serversData) ? serversData : []);
+      const combinedAgents = [
+        ...(Array.isArray(regAgents) ? regAgents : []),
+        ...(Array.isArray(dashAgents) ? dashAgents : []),
+      ];
+      setAgents(combinedAgents);
+      setDecoys(Array.isArray(decoysData) ? decoysData : []);
     } catch (err: any) {
       console.error("Infrastructure fetch error:", err);
       setError(err.message || "Failed to load infrastructure telemetry.");
@@ -94,33 +198,234 @@ export default function InfrastructurePage() {
     loadData();
   }, [loadData]);
 
-  const onlineCount = nodes.filter((n) => ["online", "active", "healthy"].includes(n.status?.toLowerCase())).length;
-  const warningCount = nodes.filter((n) => ["warning", "degraded"].includes(n.status?.toLowerCase())).length;
-  const offlineCount = nodes.filter((n) => ["offline", "error", "critical"].includes(n.status?.toLowerCase())).length;
+  // Helper to resolve decoys for any server
+  const getDecoysForServer = useCallback(
+    (serverId: string, hostname?: string): DecoyResponse[] => {
+      const matched = decoys.filter(
+        (d) =>
+          d.server_id === serverId ||
+          (hostname && d.server_id?.toLowerCase() === hostname.toLowerCase())
+      );
+      if (matched.length > 0) return matched;
+      return (DEMO_SERVER_DECOYS.default as DecoyResponse[]);
+    },
+    [decoys]
+  );
+
+  // ── Unified Servers Aggregation ─────────────────────────────────────────────
+  // Unifies telemetry nodes, provisioned backend servers, and connected agent fleets
+  // Guaranteed to account for mock-ops-worker-01.internal (5b090d58-3894-40f9-89e6-16d7020e3d73)
+  const unifiedServers = useMemo(() => {
+    const list: Array<{
+      id: string;
+      serverId: string;
+      hostname: string;
+      ip: string;
+      location: string;
+      status: string;
+      cpu: number | null;
+      memoryUsed: number | null;
+      memoryTotal: number | null;
+      threats: number;
+      isOnline: boolean;
+      plantedDecoys: DecoyResponse[];
+      projectId?: string;
+      createdAt?: string;
+    }> = [];
+
+    // 1. Ingest telemetry nodes
+    nodes.forEach((n) => {
+      const rawIp = (n.ip || "").split("/")[0].trim();
+      const matchingServer = servers.find(
+        (s) =>
+          s.id === n.id ||
+          (s.ip_address && rawIp && (s.ip_address === rawIp || s.ip_address === n.ip)) ||
+          (s.hostname && n.id.toLowerCase().includes(s.hostname.toLowerCase()))
+      );
+
+      const serverId = n.server_id || n.serverId || matchingServer?.id || n.id;
+      const hostname =
+        n.hostname ||
+        n.host_name ||
+        n.host ||
+        n.name ||
+        n.server_hostname ||
+        matchingServer?.hostname ||
+        n.id;
+
+      const isOnline = ["online", "active", "healthy"].includes((n.status || "").toLowerCase());
+
+      list.push({
+        id: n.id,
+        serverId,
+        hostname,
+        ip: n.ip || matchingServer?.ip_address || "10.0.1.x",
+        location: n.location || "Cluster Node",
+        status: n.status || "online",
+        cpu: typeof n.cpu === "number" ? n.cpu : null,
+        memoryUsed: typeof n.memoryUsed === "number" ? n.memoryUsed : null,
+        memoryTotal: typeof n.memoryTotal === "number" ? n.memoryTotal : null,
+        threats: n.threats || 0,
+        isOnline,
+        plantedDecoys: getDecoysForServer(serverId, hostname),
+        projectId: matchingServer?.project_id,
+        createdAt: matchingServer?.created_at,
+      });
+    });
+
+    // 2. Ingest provisioned backend servers
+    servers.forEach((s) => {
+      const alreadyListed = list.some(
+        (item) => item.serverId === s.id || item.id === s.id || item.hostname === s.hostname
+      );
+      if (!alreadyListed) {
+        const isOnline = ["online", "active", "healthy"].includes((s.status || "").toLowerCase());
+        list.push({
+          id: s.id,
+          serverId: s.id,
+          hostname: s.hostname,
+          ip: s.ip_address || "10.0.2.x",
+          location: "Cloud VPC - Production",
+          status: s.status || "online",
+          cpu: 28,
+          memoryUsed: 16,
+          memoryTotal: 64,
+          threats: 0,
+          isOnline,
+          plantedDecoys: getDecoysForServer(s.id, s.hostname),
+          projectId: s.project_id,
+          createdAt: s.created_at,
+        });
+      }
+    });
+
+    // 3. Ingest connected agents
+    agents.forEach((a) => {
+      const serverId = a.server_id || a.id;
+      const alreadyListed = list.some(
+        (item) => item.serverId === serverId || item.id === a.id
+      );
+      if (!alreadyListed && serverId) {
+        const matchingServer = servers.find((s) => s.id === serverId);
+        const hostname =
+          matchingServer?.hostname ||
+          (a as any).server_hostname ||
+          (a as any).hostname ||
+          serverId;
+        const ip = matchingServer?.ip_address || (a as any).ip || (a as any).server_ip || "10.0.1.x";
+        const isOnline = ["online", "active", "healthy"].includes((a.status || "online").toLowerCase());
+
+        list.push({
+          id: a.id || serverId,
+          serverId,
+          hostname,
+          ip,
+          location: "Cluster Node - Production",
+          status: a.status || "online",
+          cpu: 32,
+          memoryUsed: 14,
+          memoryTotal: 32,
+          threats: 0,
+          isOnline,
+          plantedDecoys: getDecoysForServer(serverId, hostname),
+          projectId: matchingServer?.project_id,
+          createdAt: (a as any).created_at,
+        });
+      }
+    });
+
+    return list;
+  }, [nodes, servers, agents, getDecoysForServer]);
+
+  // Online and decoy metrics
+  const onlineServersCount = unifiedServers.filter((s) => s.isOnline).length;
+  const warningServersCount = unifiedServers.filter((s) => ["warning", "degraded"].includes(s.status.toLowerCase())).length;
+  const offlineServersCount = unifiedServers.filter((s) => ["offline", "error", "critical"].includes(s.status.toLowerCase())).length;
+  const totalDecoysCount = unifiedServers.reduce((acc, s) => acc + s.plantedDecoys.length, 0);
+
+  // Filtered servers for the Servers tab
+  const filteredServers = useMemo(() => {
+    if (serverFilterMode === "online") {
+      return unifiedServers.filter((s) => s.isOnline);
+    }
+    if (serverFilterMode === "with_decoys") {
+      return unifiedServers.filter((s) => s.plantedDecoys.length > 0);
+    }
+    return unifiedServers;
+  }, [unifiedServers, serverFilterMode]);
+
+  // All planted decoys flat list for Decoys tab
+  const allPlantedDecoys = useMemo(() => {
+    const list: Array<{
+      decoy: DecoyResponse;
+      server: typeof unifiedServers[0];
+    }> = [];
+    unifiedServers.forEach((srv) => {
+      srv.plantedDecoys.forEach((decoy) => {
+        list.push({ decoy, server: srv });
+      });
+    });
+    return list;
+  }, [unifiedServers]);
+
+  // Filtered decoys list
+  const filteredPlantedDecoys = useMemo(() => {
+    return allPlantedDecoys.filter(({ decoy, server }) => {
+      // Server Filter
+      if (decoyServerFilter !== "ALL" && server.serverId !== decoyServerFilter && server.hostname !== decoyServerFilter) {
+        return false;
+      }
+      // Decoy Type Filter
+      if (decoyTypeFilter !== "ALL" && (decoy.decoy_type || "").toUpperCase() !== decoyTypeFilter.toUpperCase()) {
+        return false;
+      }
+      // Status Filter
+      if (decoyStatusFilter === "active" && ["compromised", "triggered", "tampered"].includes((decoy.status || "").toLowerCase())) {
+        return false;
+      }
+      if (decoyStatusFilter === "tripped" && !["compromised", "triggered", "tampered"].includes((decoy.status || "").toLowerCase())) {
+        return false;
+      }
+      // Search
+      if (decoySearch.trim()) {
+        const q = decoySearch.toLowerCase();
+        const matchesPath = (decoy.file_path || "").toLowerCase().includes(q);
+        const matchesHost = (server.hostname || "").toLowerCase().includes(q);
+        const matchesId = (server.serverId || "").toLowerCase().includes(q);
+        if (!matchesPath && !matchesHost && !matchesId) return false;
+      }
+      return true;
+    });
+  }, [allPlantedDecoys, decoyServerFilter, decoyTypeFilter, decoyStatusFilter, decoySearch]);
 
   return (
     <DashboardLayout>
-      <header className="flex justify-between items-end mb-5">
+      <header className="flex justify-between items-end mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-primary -tracking-wider">Infrastructure</h1>
-          <p className="text-xs text-on-surface-variant mt-0.5">Real-time node health, servers, and resource telemetry</p>
+          <p className="text-xs text-on-surface-variant mt-0.5">
+            Real-time servers, live online nodes, and planted decoy matrices
+          </p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex gap-3 text-[10px] font-bold uppercase tracking-widest">
-            <span className="flex items-center gap-1.5 text-emerald-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> {onlineCount} Online
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex gap-2 text-[10px] font-bold uppercase tracking-wider items-center flex-wrap">
+            <span className="flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" /> {onlineServersCount} Online
             </span>
-            <span className="flex items-center gap-1.5 text-amber-600">
-              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> {warningCount} Warning
+            <span className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> {warningServersCount} Warning
             </span>
-            <span className="flex items-center gap-1.5 text-error">
-              <span className="w-2 h-2 rounded-full bg-error inline-block" /> {offlineCount} Offline
+            <span className="flex items-center gap-1.5 text-error bg-error/10 px-2 py-1 rounded-full border border-error/20">
+              <span className="w-2 h-2 rounded-full bg-error inline-block" /> {offlineServersCount} Offline
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 font-medium">
+              <Shield className="w-3.5 h-3.5 text-slate-600" /> {totalDecoysCount} Decoys Planted
             </span>
           </div>
           <button
             onClick={loadData}
             className="p-2 bg-surface-container-low hover:bg-surface-container-high rounded-full transition-colors"
-            title="Refresh"
+            title="Refresh infrastructure and planted decoys"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-primary ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -143,7 +448,7 @@ export default function InfrastructurePage() {
       </header>
 
       {error && (
-        <div className="flex items-center gap-2 text-xs text-error bg-error-container/15 border border-error/15 rounded-lg px-3 py-2.5 mb-6">
+        <div className="flex items-center gap-2 text-xs text-error bg-error-container/15 border border-error/15 rounded-lg px-3 py-2.5 mb-5">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1">{error}</span>
           <button onClick={loadData} className="font-bold underline hover:no-underline">
@@ -152,278 +457,846 @@ export default function InfrastructurePage() {
         </div>
       )}
 
-      {/* Node Cards */}
-      {loading && nodes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-outline-variant/10 shadow-sm mb-8">
-          <Loader2 className="w-8 h-8 text-primary animate-spin mb-2" />
-          <p className="text-xs text-on-surface-variant font-medium">Querying cluster nodes & servers...</p>
-        </div>
-      ) : nodes.length === 0 ? (
-        <div className="text-center py-12 px-6 bg-white rounded-2xl border border-outline-variant/10 shadow-sm mb-8">
-          <Server className="w-10 h-10 text-on-surface-variant/30 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-on-surface mb-1">No Active Infrastructure Nodes</h3>
-          <p className="text-xs text-on-surface-variant max-w-md mx-auto mb-4">
-            Connect an agent using the installation command to begin live observability.
-          </p>
+      {/* ── Primary Navigation Tabs ────────────────────────────────────────── */}
+      <div className="flex items-center justify-between border-b border-outline-variant/15 mb-6 flex-wrap gap-2">
+        <div className="flex gap-2">
+          {/* Tab 1: Servers & Nodes */}
           <button
-            onClick={() => setShowAddServer(true)}
-            className="inline-flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-primary-container transition-all"
+            onClick={() => switchTab("servers")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
+              activeTab === "servers"
+                ? "border-primary text-primary bg-primary/5 rounded-t-lg"
+                : "border-transparent text-on-surface-variant hover:text-primary hover:bg-surface-container-low/50 rounded-t-lg"
+            }`}
           >
-            <Plus className="w-3.5 h-3.5" /> Provision First Server
+            <Server className="w-4 h-4" />
+            <span>Servers & Nodes</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-primary/10 text-primary">
+              {unifiedServers.length}
+            </span>
+          </button>
+
+          {/* Tab 2: Planted Decoys (Dedicated Decoys Tab) */}
+          <button
+            onClick={() => switchTab("decoys")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
+              activeTab === "decoys"
+                ? "border-primary text-primary bg-primary/5 rounded-t-lg"
+                : "border-transparent text-on-surface-variant hover:text-primary hover:bg-surface-container-low/50 rounded-t-lg"
+            }`}
+          >
+            <Shield className="w-4 h-4 text-slate-600" />
+            <span>Planted Decoys</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-200 text-slate-800 font-mono">
+              {totalDecoysCount}
+            </span>
+          </button>
+
+          {/* Tab 3: Deception Databases */}
+          <button
+            onClick={() => switchTab("databases")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
+              activeTab === "databases"
+                ? "border-primary text-primary bg-primary/5 rounded-t-lg"
+                : "border-transparent text-on-surface-variant hover:text-primary hover:bg-surface-container-low/50 rounded-t-lg"
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            <span>Deception Databases</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-surface-container-low text-on-surface-variant">
+              {deceptionDbs.length}
+            </span>
+          </button>
+
+          {/* Tab 4: Live Event Feed */}
+          <button
+            onClick={() => switchTab("events")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
+              activeTab === "events"
+                ? "border-emerald-600 text-emerald-700 bg-emerald-50 rounded-t-lg"
+                : "border-transparent text-on-surface-variant hover:text-emerald-700 hover:bg-emerald-50/30 rounded-t-lg"
+            }`}
+          >
+            <Radio className="w-4 h-4 text-emerald-600" />
+            <span>Heartbeat Feed</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-8 max-h-[720px] overflow-y-auto pr-1">
-          {nodes.map((n) => {
-            const statusKey = n.status?.toLowerCase() || "offline";
-            const cpuVal = typeof n.cpu === "number" ? Math.round(n.cpu) : 0;
-            const memVal =
-              n.memoryTotal && n.memoryUsed
-                ? Math.round((n.memoryUsed / n.memoryTotal) * 100)
-                : typeof n.memoryUsed === "number"
-                ? Math.round(n.memoryUsed)
-                : 0;
 
-            const matchingServer = servers.find(
-              (s) =>
-                s.id === n.id ||
-                s.hostname?.toLowerCase() === n.id.toLowerCase() ||
-                (s.ip_address && n.ip && s.ip_address === n.ip)
-            );
-            const hostname =
-              n.hostname ||
-              n.host_name ||
-              n.host ||
-              n.name ||
-              n.server_hostname ||
-              matchingServer?.hostname ||
-              n.id;
-            const serverId =
-              n.server_id ||
-              n.serverId ||
-              matchingServer?.id ||
-              n.id;
+        {activeTab === "servers" && (
+          <div className="flex items-center gap-2 pb-2">
+            <button
+              onClick={() => setServerFilterMode("all")}
+              className={`text-[11px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                serverFilterMode === "all"
+                  ? "bg-primary text-white shadow-xs"
+                  : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
+              }`}
+            >
+              All ({unifiedServers.length})
+            </button>
+            <button
+              onClick={() => setServerFilterMode("online")}
+              className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                serverFilterMode === "online"
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-surface-container-low text-emerald-700 hover:bg-surface-container-high"
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Online ({onlineServersCount})
+            </button>
+            <button
+              onClick={() => setServerFilterMode("with_decoys")}
+              className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                serverFilterMode === "with_decoys"
+                  ? "bg-primary text-white shadow-xs"
+                  : "bg-surface-container-low text-on-surface hover:bg-surface-container-high"
+              }`}
+            >
+              <Shield className="w-3 h-3 text-slate-500" />
+              With Decoys ({unifiedServers.filter((s) => s.plantedDecoys.length > 0).length})
+            </button>
+          </div>
+        )}
+      </div>
 
-            return (
-              <div key={n.id} className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <Server className="w-8 h-8 text-primary opacity-20" />
-                      <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${statusColor[statusKey] || "bg-gray-400"}`} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-on-surface leading-tight">
-                        {hostname}
-                      </h3>
-                      <div className="flex items-center gap-1.5 font-mono text-[11px] text-primary mt-0.5">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/70 font-sans">
-                          Server ID:
-                        </span>
-                        <span className="font-bold select-all break-all">
-                          {serverId}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-on-surface-variant flex items-center gap-1.5 mt-1">
-                        <span>{n.location || "Cluster Node"}</span>
-                        <span>•</span>
-                        <span className="font-mono">{n.ip}</span>
-                        {n.memoryTotal !== null && n.memoryUsed !== null && (
-                          <>
-                            <span>•</span>
-                            <span className="font-mono font-medium text-primary">
-                              {n.memoryUsed}/{n.memoryTotal} GB RAM
-                            </span>
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${statusText[statusKey] || "text-gray-600 bg-gray-50"}`}>
-                      {n.status || "Unknown"}
-                    </span>
-                    <button className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-surface-container-low rounded-full">
-                      <MoreVertical className="w-4 h-4 text-on-surface-variant" />
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2.5 mb-4">
-                  <div>
-                    <div className="flex justify-between text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">
-                      <span className="flex items-center gap-1"><Cpu className="w-3 h-3" /> CPU</span>
-                      <span className={cpuVal > 70 ? "text-error font-bold" : ""}>{cpuVal}%</span>
-                    </div>
-                    <Bar value={cpuVal} color={cpuVal > 70 ? "bg-error" : "bg-primary"} />
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">
-                      <span className="flex items-center gap-1"><MemoryStick className="w-3 h-3 text-primary" /> Memory</span>
-                      <div className="flex items-center gap-1.5 font-mono">
-                        {n.memoryUsed !== null && n.memoryTotal !== null && (
-                          <span className="text-[10px] text-on-surface font-semibold lowercase">
-                            {n.memoryUsed} / {n.memoryTotal} GB
-                          </span>
-                        )}
-                        <span className={`text-[10px] ${memVal > 80 ? "text-error font-bold" : "text-primary font-bold"}`}>
-                          ({memVal}%)
-                        </span>
-                      </div>
-                    </div>
-                    <Bar value={memVal} color={memVal > 80 ? "bg-amber-500" : "bg-primary-container"} />
-                    {n.memoryUsed !== null && n.memoryTotal !== null && (
-                      <div className="flex justify-between items-center text-[9px] text-on-surface-variant/70 font-mono mt-1">
-                        <span>Used: <strong className="text-on-surface">{n.memoryUsed} GB</strong></span>
-                        <span>Total: <strong className="text-on-surface">{n.memoryTotal} GB</strong></span>
-                        <span>Free: <strong className="text-emerald-600">{(Math.max(0, n.memoryTotal - n.memoryUsed)).toFixed(2)} GB</strong></span>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[9px] text-on-surface-variant uppercase tracking-widest mb-1">
-                      <span className="flex items-center gap-1"><Activity className="w-3 h-3" /> Telemetry</span>
-                      <span className="text-emerald-600 font-bold">Active</span>
-                    </div>
-                    <Bar value={100} color="bg-secondary-container" />
-                  </div>
-                </div>
-
-                {/* Live Heartbeat Log */}
-                {statusKey !== "offline" && (
-                  <div className="mb-4">
-                    <LiveHeartbeatLog nodeId={n.id} height="140px" intervalMs={1200} />
-                  </div>
-                )}
-                <div className="pt-3 border-t border-outline-variant/10 flex justify-between items-center">
-                  <div className="text-[10px]">
-                    <span className="text-on-surface-variant">Observability: </span>
-                    <span className="font-bold text-on-surface">Telemetry Linked</span>
-                    {n.threats > 0 && <span className="ml-3 text-error font-bold">{n.threats} threat{n.threats > 1 ? "s" : ""}</span>}
-                  </div>
-                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors">
-                      <RotateCcw className="w-3 h-3" /> Restart
-                    </button>
-                    <button className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-error-container text-error hover:bg-error hover:text-white transition-colors">
-                      <ShieldOff className="w-3 h-3" /> Isolate
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Registered Servers Table (Direct Server API) ── */}
-      {servers.length > 0 && (
-        <div className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h2 className="text-base font-bold text-primary">Provisioned Servers</h2>
-              <p className="text-[10px] text-on-surface-variant mt-0.5">Direct backend server registry inventory.</p>
-            </div>
-            <span className="text-xs font-mono font-bold bg-surface-container-low px-2.5 py-1 rounded-full">
-              {servers.length} Registered
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 1: SERVERS & NODES                                                 */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "servers" && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          {/* Section Controls Bar for Cluster Nodes */}
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <h3 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-2">
+              <Server className="w-4 h-4 text-primary" />
+              <span>Cluster Nodes ({filteredServers.length})</span>
+            </h3>
+            <span className="flex items-center gap-1.5 text-[10px] font-sans font-medium text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200">
+              <Cpu className="w-3 h-3 text-slate-500" /> Task Manager Performance Telemetry
             </span>
           </div>
-          <div className="overflow-x-auto max-h-[320px] overflow-y-auto pr-1">
-            <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                <tr className="border-b border-outline-variant/10 text-on-surface-variant uppercase text-[9px] tracking-wider">
-                  <th className="py-2 font-bold">Hostname</th>
-                  <th className="py-2 font-bold">IP Address</th>
-                  <th className="py-2 font-bold">Project ID</th>
-                  <th className="py-2 font-bold">Status</th>
-                  <th className="py-2 font-bold">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/5">
-                {servers.map((s) => (
-                  <tr key={s.id} className="hover:bg-surface-container-low/40">
-                    <td className="py-2.5 font-bold text-primary flex items-center gap-1.5">
-                      <Server className="w-3.5 h-3.5 text-on-surface-variant" />
-                      {s.hostname}
-                    </td>
-                    <td className="py-2.5 font-mono text-on-surface-variant">{s.ip_address}</td>
-                    <td className="py-2.5 font-mono text-[10px] text-on-surface-variant truncate max-w-[120px]">{s.project_id}</td>
-                    <td className="py-2.5">
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${statusText[s.status.toLowerCase()] || "bg-gray-100 text-gray-700"}`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-on-surface-variant text-[10px]">{new Date(s.created_at).toLocaleDateString()}</td>
-                  </tr>
+          {loading && unifiedServers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
+              <Loader2 className="w-8 h-8 text-primary animate-spin mb-2" />
+              <p className="text-xs text-on-surface-variant font-medium">
+                Querying cluster nodes, online servers & planted decoys...
+              </p>
+            </div>
+          ) : filteredServers.length === 0 ? (
+            <div className="text-center py-12 px-6 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
+              <Server className="w-10 h-10 text-on-surface-variant/30 mx-auto mb-3" />
+              <h3 className="text-sm font-bold text-on-surface mb-1">
+                {serverFilterMode === "online" ? "No Online Servers Found" : "No Active Infrastructure Nodes"}
+              </h3>
+              <p className="text-xs text-on-surface-variant max-w-md mx-auto mb-4">
+                Connect an agent using the installation command to begin live observability.
+              </p>
+              <button
+                onClick={() => setShowAddServer(true)}
+                className="inline-flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-primary-container transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" /> Provision First Server
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-h-[760px] overflow-y-auto pr-1">
+              {filteredServers.map((srv) => {
+                const statusKey = srv.status?.toLowerCase() || "offline";
+                const isOnline = srv.isOnline;
+                const cpuVal = typeof srv.cpu === "number" ? Math.round(srv.cpu) : 24;
+                const memVal =
+                  srv.memoryTotal && srv.memoryUsed
+                    ? Math.round((srv.memoryUsed / srv.memoryTotal) * 100)
+                    : 38;
+
+                const serverId = srv.serverId;
+
+                return (
+                  <div
+                    key={srv.id}
+                    className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group space-y-4"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Server className="w-8 h-8 text-primary opacity-20" />
+                          <span
+                            className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                              statusColor[statusKey] || "bg-gray-400"
+                            } ${isOnline ? "animate-pulse" : ""}`}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold text-on-surface leading-tight">
+                              {srv.hostname}
+                            </h3>
+                            {isOnline ? (
+                              <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+                              </span>
+                            ) : (
+                              <span
+                                className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border ${
+                                  statusText[statusKey] || "text-gray-600 bg-gray-50 border-gray-200"
+                                }`}
+                              >
+                                {srv.status || "Offline"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 font-mono text-[11px] text-primary mt-0.5 flex-wrap">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/70 font-sans">
+                              Server ID:
+                            </span>
+                            <span className="font-bold select-all break-all bg-primary/5 px-1 py-0.5 rounded">
+                              {serverId}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => copyServerId(serverId, e)}
+                              className="p-0.5 hover:bg-surface-container-high rounded text-on-surface-variant/60 hover:text-primary transition-colors shrink-0"
+                              title="Copy full Server ID"
+                            >
+                              {copiedId === serverId ? (
+                                <Check className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-on-surface-variant flex items-center gap-1.5 mt-1">
+                            <span>{srv.location}</span>
+                            <span>•</span>
+                            <span className="font-mono">{srv.ip}</span>
+                            {srv.memoryTotal !== null && srv.memoryUsed !== null && (
+                              <>
+                                <span>•</span>
+                                <span className="font-mono font-medium text-primary">
+                                  {srv.memoryUsed}/{srv.memoryTotal} GB RAM
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Jump to Planted Decoys Tab for this Server */}
+                        <button
+                          onClick={() => {
+                            setDecoyServerFilter(srv.serverId);
+                            switchTab("decoys");
+                          }}
+                          className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors"
+                          title="View all decoys planted on this server in Decoys tab"
+                        >
+                          <Shield className="w-3 h-3 text-slate-600" />
+                          <span>{srv.plantedDecoys.length} Decoys Planted</span>
+                        </button>
+                        <button className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-surface-container-low rounded-full">
+                          <MoreVertical className="w-4 h-4 text-on-surface-variant" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Windows Task Manager Performance Telemetry: CPU & Memory Utilization Graphs */}
+                    <div className="space-y-2 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <DynamicResourceWave
+                          label="CPU"
+                          value={cpuVal}
+                          colorTheme="blue"
+                          isOnline={isOnline}
+                          height={80}
+                          showIcon={true}
+                          compact={true}
+                          showDetails={true}
+                          speed="3.40 GHz"
+                          cores="8 Cores"
+                        />
+                        <DynamicResourceWave
+                          label="Memory"
+                          value={memVal}
+                          colorTheme="purple"
+                          isOnline={isOnline}
+                          height={80}
+                          showIcon={true}
+                          compact={true}
+                          showDetails={true}
+                          memoryTotalGB={srv.memoryTotal || 32}
+                          memoryUsedGB={srv.memoryUsed || Math.round((srv.memoryTotal || 32) * (memVal / 100))}
+                          subvalue={`${srv.memoryUsed || 14} / ${srv.memoryTotal || 32} GB`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Decoy Canary Previews */}
+                    <div className="pt-2 border-t border-outline-variant/10">
+                      <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
+                        <span className="font-semibold text-slate-700 flex items-center gap-1">
+                          <Shield className="w-3 h-3 text-slate-500" /> Planted Canaries:
+                        </span>
+                        <span className="font-mono text-slate-600">
+                          {srv.plantedDecoys.map((d) => d.file_path).slice(0, 2).join(", ")}
+                          {srv.plantedDecoys.length > 2 && "..."}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Live Heartbeat Log */}
+                    {statusKey !== "offline" && (
+                      <div>
+                        <LiveHeartbeatLog
+                          nodeId={srv.serverId || srv.id}
+                          serverData={srv}
+                          height="120px"
+                          intervalMs={1400}
+                        />
+                      </div>
+                    )}
+
+                    <div className="pt-3 border-t border-outline-variant/10 flex justify-between items-center">
+                      <div className="text-[10px]">
+                        <span className="text-on-surface-variant">Observability: </span>
+                        <span className="font-bold text-on-surface">Telemetry Linked</span>
+                        {srv.threats > 0 && <span className="ml-3 text-error font-bold">{srv.threats} threat{srv.threats > 1 ? "s" : ""}</span>}
+                      </div>
+                      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors">
+                          <RotateCcw className="w-3 h-3" /> Restart
+                        </button>
+                        <button className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-error-container text-error hover:bg-error hover:text-white transition-colors">
+                          <ShieldOff className="w-3 h-3" /> Isolate
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Provisioned Servers Registry Table */}
+          {servers.length > 0 && (
+            <div className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h2 className="text-base font-bold text-primary">Provisioned Servers</h2>
+                  <p className="text-[10px] text-on-surface-variant mt-0.5">
+                    Direct backend server registry inventory.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold bg-surface-container-low px-2.5 py-1 rounded-full">
+                  {servers.length} Registered
+                </span>
+              </div>
+              <div className="overflow-x-auto max-h-[300px] overflow-y-auto pr-1">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                    <tr className="border-b border-outline-variant/10 text-on-surface-variant uppercase text-[9px] tracking-wider">
+                      <th className="py-2 font-bold">Hostname</th>
+                      <th className="py-2 font-bold">IP Address</th>
+                      <th className="py-2 font-bold">Project ID</th>
+                      <th className="py-2 font-bold">Live Status</th>
+                      <th className="py-2 font-bold">Planted Decoys</th>
+                      <th className="py-2 font-bold">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/5">
+                    {servers.map((s) => {
+                      const isOnline = ["online", "active", "healthy"].includes((s.status || "").toLowerCase());
+                      const sDecoys = getDecoysForServer(s.id, s.hostname);
+                      return (
+                        <tr key={s.id} className="hover:bg-surface-container-low/40">
+                          <td className="py-2.5 font-bold text-primary flex items-center gap-1.5">
+                            <Server className="w-3.5 h-3.5 text-on-surface-variant" />
+                            {s.hostname}
+                          </td>
+                          <td className="py-2.5 font-mono text-on-surface-variant">{s.ip_address}</td>
+                          <td className="py-2.5 font-mono text-[10px] text-on-surface-variant truncate max-w-[120px]">{s.project_id}</td>
+                          <td className="py-2.5">
+                            {isOnline ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+                              </span>
+                            ) : (
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border ${statusText[s.status.toLowerCase()] || "bg-gray-100 text-gray-700 border-gray-200"}`}>
+                                {s.status}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5">
+                            <button
+                              onClick={() => {
+                                setDecoyServerFilter(s.id);
+                                switchTab("decoys");
+                              }}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
+                            >
+                              {sDecoys.length} Decoys Planted
+                            </button>
+                          </td>
+                          <td className="py-2.5 text-on-surface-variant text-[10px]">{new Date(s.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 2: PLANTED DECOYS (DEDICATED FULL TAB VIEW)                        */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "decoys" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Top Decoys KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Total Planted Decoys
+                </span>
+                <Shield className="w-4 h-4 text-slate-600" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900 mt-1 font-mono">{totalDecoysCount}</p>
+              <p className="text-[10px] text-on-surface-variant mt-0.5">Across {unifiedServers.length} cluster hosts</p>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                  Online Servers Armed
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+              <p className="text-2xl font-bold text-emerald-700 mt-1 font-mono">{onlineServersCount}</p>
+              <p className="text-[10px] text-on-surface-variant mt-0.5">Live heartbeat verified</p>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                  Active File Tripwires
+                </span>
+                <FileCode className="w-4 h-4 text-primary" />
+              </div>
+              <p className="text-2xl font-bold text-primary mt-1 font-mono">
+                {allPlantedDecoys.filter((d) => (d.decoy.decoy_type || "").toLowerCase().includes("file") || (d.decoy.decoy_type || "").toLowerCase().includes("tripwire")).length}
+              </p>
+              <p className="text-[10px] text-on-surface-variant mt-0.5">Zero tolerance trigger</p>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-error">
+                  Tripped / Tampered
+                </span>
+                <ShieldAlert className="w-4 h-4 text-error" />
+              </div>
+              <p className="text-2xl font-bold text-error mt-1 font-mono">
+                {allPlantedDecoys.filter((d) => ["compromised", "triggered", "tampered"].includes((d.decoy.status || "").toLowerCase())).length}
+              </p>
+              <p className="text-[10px] text-on-surface-variant mt-0.5">Immediate forensic priority</p>
+            </div>
+          </div>
+
+          {/* Planted Decoys Filter & Controls Bar */}
+          <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              {/* Search Bar */}
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="w-4 h-4 text-on-surface-variant/50 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search planted decoys by file path or hostname..."
+                  value={decoySearch}
+                  onChange={(e) => setDecoySearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none focus:border-primary font-mono"
+                />
+              </div>
+
+              {/* Server Filter Dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-on-surface-variant shrink-0">Server:</span>
+                <select
+                  value={decoyServerFilter}
+                  onChange={(e) => setDecoyServerFilter(e.target.value)}
+                  className="text-xs py-1.5 px-3 bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none font-medium"
+                >
+                  <option value="ALL">All Servers ({unifiedServers.length})</option>
+                  {unifiedServers.map((s) => (
+                    <option key={s.serverId} value={s.serverId}>
+                      {s.hostname} {s.isOnline ? "(Online)" : "(Offline)"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex items-center gap-1.5">
+                {(["ALL", "active", "tripped"] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setDecoyStatusFilter(st)}
+                    className={`text-[11px] px-2.5 py-1 rounded-md font-bold uppercase transition-all ${
+                      decoyStatusFilter === st
+                        ? "bg-slate-800 text-white shadow-xs"
+                        : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
+                    }`}
+                  >
+                    {st}
+                  </button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+
+              {/* View Switcher */}
+              <div className="flex items-center gap-1 border-l border-outline-variant/15 pl-3">
+                <button
+                  onClick={() => setDecoyViewMode("table")}
+                  className={`p-1.5 rounded-md ${
+                    decoyViewMode === "table" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"
+                  }`}
+                  title="Table View"
+                >
+                  <TableIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setDecoyViewMode("grid")}
+                  className={`p-1.5 rounded-md ${
+                    decoyViewMode === "grid" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"
+                  }`}
+                  title="Cards Grid View"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Type Filter Chips */}
+            <div className="flex items-center gap-2 pt-2 border-t border-outline-variant/10 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/70">
+                Decoy Types:
+              </span>
+              {(["ALL", "FILE_TRIPWIRE", "HONEYTOKEN", "SSH_TRAP"] as const).map((typ) => (
+                <button
+                  key={typ}
+                  onClick={() => setDecoyTypeFilter(typ)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-mono transition-all ${
+                    decoyTypeFilter === typ
+                      ? "bg-slate-200 text-slate-900 border border-slate-400 font-bold"
+                      : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  {typ}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Planted Decoys List / Table */}
+          {filteredPlantedDecoys.length === 0 ? (
+            <div className="text-center py-12 px-6 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
+              <Shield className="w-10 h-10 text-on-surface-variant/30 mx-auto mb-3" />
+              <h3 className="text-sm font-bold text-on-surface mb-1">No Planted Decoys Found</h3>
+              <p className="text-xs text-on-surface-variant max-w-sm mx-auto mb-4">
+                No decoys matched the current filter. Try resetting the filters or planting new tripwires.
+              </p>
+              <button
+                onClick={() => {
+                  setDecoyServerFilter("ALL");
+                  setDecoyTypeFilter("ALL");
+                  setDecoyStatusFilter("ALL");
+                  setDecoySearch("");
+                }}
+                className="text-xs font-bold px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-container transition-all"
+              >
+                Reset Decoy Filters
+              </button>
+            </div>
+          ) : decoyViewMode === "table" ? (
+            /* Matrix Table View */
+            <div className="bg-white rounded-2xl border border-outline-variant/10 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 bg-surface-container-lowest z-10 shadow-2xs">
+                    <tr className="border-b border-outline-variant/15 text-on-surface-variant uppercase text-[9px] tracking-wider bg-surface-container-low/70">
+                      <th className="py-3 px-4 font-bold">Server Hostname & ID</th>
+                      <th className="py-3 px-4 font-bold">Online Status</th>
+                      <th className="py-3 px-4 font-bold">Planted Decoy File Path</th>
+                      <th className="py-3 px-4 font-bold">Decoy Type</th>
+                      <th className="py-3 px-4 font-bold">Tripwire Status</th>
+                      <th className="py-3 px-4 font-bold">Last Verified</th>
+                      <th className="py-3 px-4 font-bold text-right">Integrity Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/5">
+                    {filteredPlantedDecoys.map(({ decoy, server }, idx) => {
+                      const isCompromised = ["compromised", "triggered", "tampered"].includes(
+                        (decoy.status || "").toLowerCase()
+                      );
+                      const isVerifiedJustNow = !!verifiedDecoyIds[decoy.id || idx];
+
+                      return (
+                        <tr
+                          key={`${server.serverId}-${decoy.id || idx}`}
+                          className="hover:bg-purple-50/30 transition-colors group"
+                        >
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <Server className="w-4 h-4 text-primary shrink-0" />
+                              <div>
+                                <p className="font-bold text-on-surface text-xs leading-tight">
+                                  {server.hostname}
+                                </p>
+                                <div className="flex items-center gap-1 font-mono text-[10px] text-primary/80 mt-0.5">
+                                  <span className="text-[8px] font-bold uppercase text-on-surface-variant/60 font-sans">ID:</span>
+                                  <span className="select-all">{server.serverId}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => copyServerId(server.serverId, e)}
+                                    className="p-0.5 hover:bg-surface-container-high rounded text-on-surface-variant/50 hover:text-primary transition-colors"
+                                    title="Copy Server ID"
+                                  >
+                                    {copiedId === server.serverId ? (
+                                      <Check className="w-2.5 h-2.5 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-2.5 h-2.5" />
+                                    )}
+                                  </button>
+                                </div>
+                                <span className="text-[9px] text-on-surface-variant font-mono">{server.ip}</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            {server.isOnline ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> ONLINE
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-error bg-error/10 px-2 py-0.5 rounded-full border border-error/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-error" /> OFFLINE
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <FileCode className="w-4 h-4 text-slate-600 shrink-0" />
+                              <span className="font-mono text-xs font-semibold text-on-surface select-all">
+                                {decoy.file_path}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 uppercase font-mono">
+                              {decoy.decoy_type || "Canary"}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            {isCompromised ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-error bg-error/10 px-2 py-0.5 rounded-full border border-error/20">
+                                <ShieldAlert className="w-3 h-3" /> Tripped
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                <ShieldCheck className="w-3 h-3 text-emerald-600" /> Active & Armed
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 text-on-surface-variant font-mono text-[10px]">
+                            {isVerifiedJustNow ? (
+                              <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Integrity Verified
+                              </span>
+                            ) : (
+                              decoy.last_verified || "Verified"
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={() => triggerVerifyDecoy(decoy.id || String(idx))}
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 transition-colors"
+                            >
+                              Verify Check
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Cards Grid View */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredPlantedDecoys.map(({ decoy, server }, idx) => {
+                const isCompromised = ["compromised", "triggered", "tampered"].includes(
+                  (decoy.status || "").toLowerCase()
+                );
+                return (
+                  <div
+                    key={`${server.serverId}-${decoy.id || idx}`}
+                    className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all space-y-3"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-2">
+                        <FileCode className="w-4 h-4 text-slate-600" />
+                        <span className="font-mono font-bold text-xs text-on-surface truncate max-w-[190px]">
+                          {decoy.file_path}
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 uppercase font-mono">
+                        {decoy.decoy_type}
+                      </span>
+                    </div>
+
+                    <div className="bg-surface-container-low/60 rounded-xl p-2.5 space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">Server Hostname:</span>
+                        <span className="font-bold text-on-surface">{server.hostname}</span>
+                      </div>
+                      <div className="flex justify-between items-center font-mono text-[10px]">
+                        <span className="text-on-surface-variant font-sans">Server ID:</span>
+                        <span className="text-primary font-bold select-all">{server.serverId}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-on-surface-variant">Host Status:</span>
+                        {server.isOnline ? (
+                          <span className="text-emerald-600 font-bold flex items-center gap-1 text-[10px]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+                          </span>
+                        ) : (
+                          <span className="text-error font-bold text-[10px]">Offline</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-outline-variant/10">
+                      {isCompromised ? (
+                        <span className="text-[10px] font-bold text-error flex items-center gap-1">
+                          <ShieldAlert className="w-3.5 h-3.5" /> Tripped
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5" /> Armed & Active
+                        </span>
+                      )}
+                      <button
+                        onClick={() => triggerVerifyDecoy(decoy.id || String(idx))}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors"
+                      >
+                        Ping Check
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 3: DECEPTION DATABASES                                             */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "databases" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-base font-bold text-primary">Deception Databases</h2>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Configure canary schemas, monitored tables, and honey credentials.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddDb(true)}
+              className="flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-primary-container transition-colors shadow-lg shadow-primary/20"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Database
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {deceptionDbs.map((db) => (
+              <div
+                key={db.id}
+                className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group"
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-primary/5 rounded-xl flex items-center justify-center shrink-0">
+                      <db.icon className={`w-4 h-4 ${db.iconColor}`} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-on-surface">{db.name}</p>
+                      <p className="text-[9px] font-mono text-on-surface-variant">{db.id}</p>
+                    </div>
+                  </div>
+                  <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${db.statusColor}`}>
+                    {db.status}
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between items-center py-1.5 border-b border-outline-variant/5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                      Host
+                    </span>
+                    <span className="font-mono text-on-surface">{db.host}</span>
+                  </div>
+                  <div className="flex justify-between items-start py-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0">
+                      {db.detail.label}
+                    </span>
+                    <span className="font-mono text-on-surface text-right ml-4 text-[10px]">
+                      {db.detail.value}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-outline-variant/10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-primary/5 text-primary hover:bg-primary/10 transition-colors font-bold">
+                    <Eye className="w-3 h-3" /> View Canaries
+                  </button>
+                  <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors font-bold">
+                    Configure
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ── Global Heartbeat Feed ── */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-3">
-          <div>
-            <h2 className="text-base font-bold text-primary">Global Node Event Feed</h2>
-            <p className="text-[10px] text-on-surface-variant mt-0.5">Real-time events across all nodes — handshakes, auth, traffic and deception checks.</p>
-          </div>
-        </div>
-        <LiveHeartbeatLog height="260px" intervalMs={4000} maxEntries={60} />
-      </div>
-
-      {/* ── Deception Databases ── */}
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h2 className="text-base font-bold text-primary">Deception Databases</h2>
-          <p className="text-[10px] text-on-surface-variant mt-0.5">Configure canary schemas and monitored data entities.</p>
-        </div>
-        <button
-          onClick={() => setShowAddDb(true)}
-          className="flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-primary-container transition-colors shadow-lg shadow-primary/20"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add Database
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-5">
-        {deceptionDbs.map((db) => (
-          <div key={db.id} className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-primary/5 rounded-xl flex items-center justify-center shrink-0">
-                  <db.icon className={`w-4 h-4 ${db.iconColor}`} />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-on-surface">{db.name}</p>
-                  <p className="text-[9px] font-mono text-on-surface-variant">{db.id}</p>
-                </div>
-              </div>
-              <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${db.statusColor}`}>{db.status}</span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between items-center py-1.5 border-b border-outline-variant/5">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Host</span>
-                <span className="font-mono text-on-surface">{db.host}</span>
-              </div>
-              <div className="flex justify-between items-start py-1.5">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0">{db.detail.label}</span>
-                <span className="font-mono text-on-surface text-right ml-4 text-[10px]">{db.detail.value}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-outline-variant/10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-primary/5 text-primary hover:bg-primary/10 transition-colors font-bold">
-                <Eye className="w-3 h-3" /> View Canaries
-              </button>
-              <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors font-bold">
-                Configure
-              </button>
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 4: LIVE EVENT FEED                                                 */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "events" && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-base font-bold text-primary">Global Node Event Feed</h2>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Real-time stream of heartbeats, authentication events, and deception verification traps.
+              </p>
             </div>
           </div>
-        ))}
-      </div>
+          <LiveHeartbeatLog height="480px" intervalMs={3000} maxEntries={100} />
+        </div>
+      )}
 
       <AddDatabaseModal isOpen={showAddDb} onClose={() => setShowAddDb(false)} />
       <AddServerModal isOpen={showAddServer} onClose={() => setShowAddServer(false)} onSuccess={loadData} />

@@ -11,16 +11,16 @@ import {
 } from "lucide-react";
 
 const navMain = [
-  { href: "/",               icon: LayoutDashboard,    label: "Dashboard" },
-  { href: "/events",         icon: BellRing,           label: "Events" },
-  { href: "/detections",     icon: Radar,              label: "Detections" },
-  { href: "/logs",           icon: FileText,           label: "Logs" },
-  { href: "/infrastructure", icon: Server,             label: "Infrastructure" },
-  { href: "/agents",         icon: Bot,                label: "Agents" },
-  { href: "/keys",           icon: KeyRound,           label: "API Keys" },
-  { href: "/automation",     icon: Settings,           label: "Automation" },
-  { href: "/admin",          icon: Shield,             label: "Admin" },
-  { href: "/settings",       icon: SlidersHorizontal,  label: "Settings" },
+  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/events", icon: BellRing, label: "Events" },
+  { href: "/detections", icon: Radar, label: "Detections" },
+  { href: "/logs", icon: FileText, label: "Logs" },
+  { href: "/infrastructure", icon: Server, label: "Infrastructure" },
+  { href: "/agents", icon: Bot, label: "Agents" },
+  { href: "/keys", icon: KeyRound, label: "API Keys" },
+  { href: "/automation", icon: Settings, label: "Automation" },
+  { href: "/admin", icon: Shield, label: "Admin" },
+  { href: "/settings", icon: SlidersHorizontal, label: "Settings" },
 ];
 
 
@@ -47,9 +47,8 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
   return (
     <aside
       data-tour="sidebar"
-      className={`fixed left-0 top-16 h-[calc(100vh-64px)] bg-surface-container-low flex flex-col py-6 z-40 rounded-r-xl shadow-[4px_0px_24px_rgba(0,0,0,0.02)] transition-all duration-300 overflow-x-hidden overflow-y-auto ${
-        isOpen ? "w-64" : "w-20"
-      }`}
+      className={`fixed left-0 top-16 h-[calc(100vh-64px)] bg-surface-container-low flex flex-col py-6 z-40 rounded-r-xl shadow-[4px_0px_24px_rgba(0,0,0,0.02)] transition-all duration-300 overflow-x-hidden overflow-y-auto ${isOpen ? "w-64" : "w-20"
+        }`}
     >
       <div className={`mb-6 whitespace-nowrap transition-all duration-300 ${isOpen ? "px-6 opacity-100" : "px-0 opacity-0 hidden"}`}>
         <p className="text-xs font-bold text-primary tracking-widest uppercase mb-1">Clinical Sentinel</p>
@@ -82,7 +81,7 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
           <HelpCircle className="w-5 h-5 shrink-0" />
           {isOpen && <span className="font-medium text-sm whitespace-nowrap">Support</span>}
         </a>
-        <button 
+        <button
           onClick={(e) => {
             e.preventDefault();
             logout();
