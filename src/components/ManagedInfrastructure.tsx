@@ -74,7 +74,7 @@ export function ManagedInfrastructure() {
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1.5">
         {loading && nodes.length === 0 && (
           <div className="flex items-center justify-center py-8 text-on-surface-variant">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />

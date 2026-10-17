@@ -37,10 +37,14 @@ export function hasPermission(
 ): boolean {
   if (!sessionUser) return false;
 
-  const perms =
+  const role = sessionUser.role || "read-only";
+  const defaultPerms = getRolePermissions(role);
+  const userPerms =
     Array.isArray(sessionUser.permissions) && sessionUser.permissions.length > 0
       ? sessionUser.permissions
-      : getRolePermissions(sessionUser.role);
+      : defaultPerms;
+
+  const perms = Array.from(new Set([...userPerms, ...defaultPerms]));
 
   if (perms.includes("*")) {
     return true;

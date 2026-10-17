@@ -189,6 +189,14 @@ export interface AuditLogEntry {
   timestamp?: string;
   ts?: string;
   ip_address?: string;
+  resource_type?: string;
+  status?: string;
+  target?: string;
+  notes?: string;
+  created_at?: string;
+  resource_id?: string;
+  severity?: string;
+  node_id?: string;
 }
 
 // ─── Bootstrap / Onboarding ───

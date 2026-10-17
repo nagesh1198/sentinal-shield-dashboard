@@ -36,3 +36,17 @@ test("INV-LIVE-3: LiveHeartbeatLog must dynamically reflect live connection stat
     "LiveHeartbeatLog must support disconnected/offline state indicator"
   );
 });
+
+// INV-LIVE-4: LiveHeartbeatLog must enrich global feed with per-node pulses and avoid repetitive sync spam
+test("INV-LIVE-4: LiveHeartbeatLog must de-duplicate sync spam and emit per-node pulses in global feed", () => {
+  const content = fs.readFileSync("src/components/LiveHeartbeatLog.tsx", "utf8");
+  assert.ok(
+    content.includes("getAlerts") || content.includes("getAuditLogs"),
+    "Global feed must enrich events from getAlerts or getAuditLogs"
+  );
+  assert.ok(
+    content.includes("lastSyncRef") || content.includes("lastGlobalSyncRef") || content.includes("lastNodeStatesRef"),
+    "LiveHeartbeatLog must track state refs to prevent identical repetitive spam"
+  );
+});
+

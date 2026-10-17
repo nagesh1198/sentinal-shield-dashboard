@@ -3,9 +3,19 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { nodeService } from "@/services/nodeService";
 import { dashboardService } from "@/services/dashboardService";
-import type { AlertPayload, NodeInventory } from "@/lib/types";
+import { adminService } from "@/services/adminService";
+import type { AlertPayload, NodeInventory, AuditLogEntry } from "@/lib/types";
 
-type Tag = "SYSTEM" | "WATCH" | "DECPTN" | "TRAFFIC" | "AUTH" | "CRYPTO" | "HEARTBEAT" | "ALERT" | "OFFLINE";
+type Tag =
+  | "SYSTEM"
+  | "WATCH"
+  | "DECPTN"
+  | "TRAFFIC"
+  | "AUTH"
+  | "CRYPTO"
+  | "HEARTBEAT"
+  | "ALERT"
+  | "OFFLINE";
 
 interface LogEntry {
   id: string;
@@ -34,6 +44,19 @@ function formatNow(): string {
   });
 }
 
+function formatIso(isoString?: string): string {
+  if (!isoString) return formatNow();
+  try {
+    return new Date(isoString).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return formatNow();
+  }
+}
+
 interface Props {
   nodeId?: string; // if provided, filters telemetry and stream for this node
   intervalMs?: number; // polling frequency for node heartbeat verification
@@ -44,19 +67,22 @@ interface Props {
 export function LiveHeartbeatLog({
   nodeId,
   intervalMs = 4000,
-  maxEntries = 40,
+  maxEntries = 50,
   height = "220px",
 }: Props) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastStateRef = useRef<string>("");
+  const lastGlobalSyncRef = useRef<string>("");
+  const lastNodeStatesRef = useRef<Map<string, string>>(new Map());
+  const tickCounterRef = useRef<number>(0);
 
-  const appendEntry = useCallback((tag: Tag, msg: string) => {
+  const appendEntry = useCallback((tag: Tag, msg: string, customTs?: string) => {
     setEntries((prev) => {
       const entry: LogEntry = {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        ts: formatNow(),
+        ts: customTs || formatNow(),
         tag,
         msg: nodeId ? `[${nodeId}] ${msg}` : msg,
       };
@@ -64,7 +90,47 @@ export function LiveHeartbeatLog({
     });
   }, [nodeId, maxEntries]);
 
-  // 1. Live Heartbeat Verification via node telemetry endpoint
+  // 1. Initial Load of Genuine Cluster History for Global Feed
+  useEffect(() => {
+    if (!nodeId) {
+      // Ingest recent security alerts
+      dashboardService
+        .getAlerts(undefined, 10)
+        .then((res) => {
+          if (res.data && res.data.length > 0) {
+            res.data.slice(0, 5).forEach((alert: AlertPayload) => {
+              appendEntry(
+                "ALERT",
+                `[${alert.server_id}] Security event: ${alert.event_type} (${alert.severity.toUpperCase()}) — ${alert.details && typeof alert.details.message === "string"
+                  ? alert.details.message
+                  : "Signal registered"
+                }`,
+                formatIso(alert.detected_at)
+              );
+            });
+          }
+        })
+        .catch(() => { });
+
+      // Ingest recent administrative audit actions if available
+      adminService
+        .getAuditLogs(5, 0)
+        .then((logs: AuditLogEntry[]) => {
+          if (Array.isArray(logs) && logs.length > 0) {
+            logs.slice(0, 3).forEach((log: AuditLogEntry) => {
+              appendEntry(
+                "AUTH",
+                `Admin audit: ${log.action} on ${log.resource_type || "system"} (${log.status})`,
+                formatIso(log.created_at || log.timestamp || log.ts)
+              );
+            });
+          }
+        })
+        .catch(() => { });
+    }
+  }, [nodeId, appendEntry]);
+
+  // 2. Live Heartbeat Verification via node telemetry endpoint
   useEffect(() => {
     let active = true;
 
@@ -73,7 +139,11 @@ export function LiveHeartbeatLog({
         const nodes: NodeInventory[] = await nodeService.getNodes();
         if (!active) return;
 
+        tickCounterRef.current += 1;
+        const isPulseTick = tickCounterRef.current % 3 === 0;
+
         if (nodeId) {
+          // Per-node Telemetry Card
           const target = nodes.find((n) => n.id === nodeId);
           if (target) {
             const isOnline = ["online", "active", "healthy"].includes(
@@ -86,16 +156,19 @@ export function LiveHeartbeatLog({
               target.memoryTotal && target.memoryUsed
                 ? Math.round((target.memoryUsed / target.memoryTotal) * 100)
                 : typeof target.memoryUsed === "number"
-                ? Math.round(target.memoryUsed)
-                : 0;
+                  ? Math.round(target.memoryUsed)
+                  : 0;
 
             const stateSnapshot = `${target.status}-${cpu}-${mem}-${target.threats}`;
 
             if (isOnline) {
-              appendEntry(
-                "HEARTBEAT",
-                `Daemon pulse ACK: ${target.status.toUpperCase()} | CPU: ${cpu}% | Mem: ${mem}% | IP: ${target.ip}`
-              );
+              // Log heartbeat pulse on change or pulse tick
+              if (lastStateRef.current !== stateSnapshot || isPulseTick) {
+                appendEntry(
+                  "HEARTBEAT",
+                  `Daemon pulse ACK: ${target.status.toUpperCase()} | CPU: ${cpu}% | Mem: ${mem}% | IP: ${target.ip}`
+                );
+              }
 
               if (target.threats > 0 && lastStateRef.current !== stateSnapshot) {
                 appendEntry(
@@ -103,7 +176,7 @@ export function LiveHeartbeatLog({
                   `Active threats flagged: ${target.threats} incident(s) under observation`
                 );
               }
-            } else {
+            } else if (lastStateRef.current !== stateSnapshot) {
               appendEntry(
                 "OFFLINE",
                 `Node status: ${target.status.toUpperCase()} — heartbeat unacknowledged`
@@ -112,23 +185,64 @@ export function LiveHeartbeatLog({
             lastStateRef.current = stateSnapshot;
           } else {
             setConnected(false);
-            appendEntry("OFFLINE", `Node not found in active cluster registry`);
+            if (lastStateRef.current !== "not-found") {
+              appendEntry("OFFLINE", `Node not found in active cluster registry`);
+              lastStateRef.current = "not-found";
+            }
           }
         } else {
-          // Cluster-wide Global Feed
+          // Global Cluster Feed
           const onlineNodes = nodes.filter((n) =>
             ["online", "active", "healthy"].includes((n.status || "").toLowerCase())
           );
           setConnected(onlineNodes.length > 0);
-          appendEntry(
-            "SYSTEM",
-            `Cluster telemetry sync: ${onlineNodes.length}/${nodes.length} nodes active and reporting heartbeats`
-          );
+
+          const syncKey = `${onlineNodes.length}/${nodes.length}`;
+          // Only emit cluster sync line if node count changed or on initial load
+          if (lastGlobalSyncRef.current !== syncKey) {
+            appendEntry(
+              "SYSTEM",
+              `Cluster telemetry sync: ${onlineNodes.length}/${nodes.length} nodes active and reporting heartbeats`
+            );
+            lastGlobalSyncRef.current = syncKey;
+          }
+
+          // For each active node, emit its heartbeat pulse if telemetry changed or on pulse tick
+          onlineNodes.forEach((n) => {
+            const cpu = typeof n.cpu === "number" ? Math.round(n.cpu) : 0;
+            const mem =
+              n.memoryTotal && n.memoryUsed
+                ? Math.round((n.memoryUsed / n.memoryTotal) * 100)
+                : typeof n.memoryUsed === "number"
+                  ? Math.round(n.memoryUsed)
+                  : 0;
+
+            const nodeSnapshot = `${n.status}-${cpu}-${mem}-${n.threats}`;
+            const prev = lastNodeStatesRef.current.get(n.id);
+
+            if (prev !== nodeSnapshot || isPulseTick) {
+              appendEntry(
+                "HEARTBEAT",
+                `[${n.id}] Pulse ACK: ${n.status.toUpperCase()} | ${n.location || "Cluster"} | IP: ${n.ip} | CPU: ${cpu}% | Mem: ${mem}%`
+              );
+              lastNodeStatesRef.current.set(n.id, nodeSnapshot);
+
+              if (n.threats > 0 && prev !== nodeSnapshot) {
+                appendEntry(
+                  "WATCH",
+                  `[${n.id}] Telemetry alert: ${n.threats} active threat vectors flagged`
+                );
+              }
+            }
+          });
         }
       } catch (err: any) {
         if (!active) return;
         setConnected(false);
-        appendEntry("SYSTEM", `Heartbeat poll failure: ${err.message || "Connection refused"}`);
+        if (lastStateRef.current !== "error") {
+          appendEntry("SYSTEM", `Heartbeat poll failure: ${err.message || "Connection refused"}`);
+          lastStateRef.current = "error";
+        }
       }
     }
 
@@ -142,7 +256,7 @@ export function LiveHeartbeatLog({
     };
   }, [nodeId, intervalMs, appendEntry]);
 
-  // 2. Real-Time SSE Stream for security alerts & audit events
+  // 3. Real-Time SSE Stream for security alerts & audit events
   useEffect(() => {
     let sse: EventSource | null = null;
     try {
@@ -185,14 +299,12 @@ export function LiveHeartbeatLog({
         </span>
         <span className="flex items-center gap-1.5">
           <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              connected ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"
-            } inline-block`}
+            className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"
+              } inline-block`}
           />
           <span
-            className={`text-[9px] font-mono ${
-              connected ? "text-emerald-400" : "text-zinc-500"
-            }`}
+            className={`text-[9px] font-mono ${connected ? "text-emerald-400" : "text-zinc-500"
+              }`}
           >
             {connected ? "LIVE" : "DISCONNECTED"}
           </span>

@@ -128,12 +128,12 @@ export function Topnav({ toggleSidebar }: { toggleSidebar: () => void }) {
               <span className="text-lg font-headline font-black tracking-tight text-[#002D80]">
                 CADOC
               </span>
-              <span className="text-lg font-headline font-black tracking-wider text-[#0070F3]">
+              <span className="text-lg font-headline font-black tracking-wider text-[#002D80]">
                 SENTINEL
               </span>
             </div>
           </div>
-          <span className="text-[10px] font-bold text-[#0052CC] bg-[#0070F3]/10 border border-[#0070F3]/25 rounded-md px-2.5 py-0.5 uppercase tracking-wide shrink-0">
+          <span className="text-[10px] font-bold text-[#002D80] bg-[#002D80]/10 border border-[#002D80]/25 rounded-md px-2.5 py-0.5 uppercase tracking-wide shrink-0">
             {dashboardTitle}
           </span>
           <div className="h-6 w-[1px] bg-outline-variant/30 mx-2"></div>

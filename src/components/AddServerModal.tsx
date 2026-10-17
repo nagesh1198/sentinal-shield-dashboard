@@ -213,7 +213,6 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-[fadeUp_0.2s_ease] border border-outline-variant/10">
         {/* Header */}
@@ -288,7 +287,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
         )}
 
         {/* Step Content */}
-        <div className="px-6 pb-6 space-y-4">
+        <div className="px-6 pb-6 space-y-4 max-h-[72vh] overflow-y-auto">
 
           {/* STEP 1: Configure */}
           {step === 1 && (

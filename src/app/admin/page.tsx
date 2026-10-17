@@ -226,7 +226,7 @@ export default function AdminPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[380px] overflow-y-auto pr-1">
           {displayClients.map((c, idx) => {
             const slug = c.company_slug || c.slug || `client-${idx}`;
             const name = c.name || slug.toUpperCase();
@@ -303,7 +303,7 @@ export default function AdminPage() {
               No cluster node telemetry available yet.
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 max-h-[460px] overflow-y-auto pr-1">
               {nodes.map((n) => {
                 const cpuVal = typeof n.cpu === "number" ? Math.round(n.cpu) : 0;
                 const memVal =

@@ -173,7 +173,7 @@ export default function InfrastructurePage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-5 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-8 max-h-[720px] overflow-y-auto pr-1">
           {nodes.map((n) => {
             const statusKey = n.status?.toLowerCase() || "offline";
             const cpuVal = typeof n.cpu === "number" ? Math.round(n.cpu) : 0;
@@ -269,9 +269,9 @@ export default function InfrastructurePage() {
               {servers.length} Registered
             </span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[320px] overflow-y-auto pr-1">
             <table className="w-full text-left text-xs">
-              <thead>
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
                 <tr className="border-b border-outline-variant/10 text-on-surface-variant uppercase text-[9px] tracking-wider">
                   <th className="py-2 font-bold">Hostname</th>
                   <th className="py-2 font-bold">IP Address</th>
@@ -311,7 +311,7 @@ export default function InfrastructurePage() {
             <p className="text-[10px] text-on-surface-variant mt-0.5">Real-time events across all nodes — handshakes, auth, traffic and deception checks.</p>
           </div>
         </div>
-        <LiveHeartbeatLog height="260px" intervalMs={500} maxEntries={60} />
+        <LiveHeartbeatLog height="260px" intervalMs={4000} maxEntries={60} />
       </div>
 
       {/* ── Deception Databases ── */}

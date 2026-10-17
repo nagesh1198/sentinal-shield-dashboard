@@ -64,7 +64,7 @@ export default function LoginPage() {
               <span className="font-headline font-black text-xl tracking-tight text-[#002D80]">
                 CADOC
               </span>
-              <span className="font-headline font-black text-xl tracking-wider text-[#0070F3]">
+              <span className="font-headline font-black text-xl tracking-wider text-[#002D80]">
                 SENTINEL
               </span>
             </div>
