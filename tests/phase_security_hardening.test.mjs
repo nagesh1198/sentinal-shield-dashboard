@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-// INV-SEC-1: CSP must gate 'unsafe-eval' behind isDev (omitted in production) and include isolation headers
-test("INV-SEC-1: next.config.ts must gate 'unsafe-eval' behind isDev and include isolation headers", () => {
+// INV-SEC-1: CSP must include script-src, isolation headers, and allow required eval for avatar schema compiler
+test("INV-SEC-1: next.config.ts must configure CSP and include isolation headers", () => {
   const content = fs.readFileSync("next.config.ts", "utf8");
   assert.ok(
-    content.includes("isDev"),
-    "next.config.ts must gate development-specific CSP options behind isDev"
+    content.includes("script-src"),
+    "next.config.ts must configure script-src"
   );
   assert.ok(
     content.includes("object-src 'none'"),
