@@ -84,7 +84,7 @@ interface Props {
 export function LiveHeartbeatLog({
   nodeId,
   serverData,
-  intervalMs = 4000,
+  intervalMs = 5000,
   maxEntries = 50,
   height = "220px",
 }: Props) {
@@ -173,9 +173,9 @@ export function LiveHeartbeatLog({
               hostname: serverData.hostname || "Cluster Node",
               ip: serverData.ip || "10.0.0.1",
               status: serverData.status || (serverData.isOnline ? "online" : "offline"),
-              cpu: typeof serverData.cpu === "number" ? serverData.cpu : 28,
-              memoryUsed: typeof serverData.memoryUsed === "number" ? serverData.memoryUsed : 16,
-              memoryTotal: typeof serverData.memoryTotal === "number" ? serverData.memoryTotal : 64,
+              cpu: typeof serverData.cpu === "number" ? serverData.cpu : null,
+              memoryUsed: typeof serverData.memoryUsed === "number" ? serverData.memoryUsed : null,
+              memoryTotal: typeof serverData.memoryTotal === "number" ? serverData.memoryTotal : null,
               threats: serverData.threats || 0,
               location: serverData.location || "Cluster Infrastructure",
             };
@@ -198,9 +198,9 @@ export function LiveHeartbeatLog({
                   hostname: telemetryMatch.hostname || telemetryMatch.name || "Telemetry Node",
                   ip: telemetryMatch.ip || "10.0.1.x",
                   status: telemetryMatch.status || "online",
-                  cpu: typeof telemetryMatch.cpu === "number" ? telemetryMatch.cpu : 24,
-                  memoryUsed: typeof telemetryMatch.memoryUsed === "number" ? telemetryMatch.memoryUsed : 12,
-                  memoryTotal: typeof telemetryMatch.memoryTotal === "number" ? telemetryMatch.memoryTotal : 32,
+                  cpu: typeof telemetryMatch.cpu === "number" ? telemetryMatch.cpu : null,
+                  memoryUsed: typeof telemetryMatch.memoryUsed === "number" ? telemetryMatch.memoryUsed : null,
+                  memoryTotal: typeof telemetryMatch.memoryTotal === "number" ? telemetryMatch.memoryTotal : null,
                   threats: telemetryMatch.threats || 0,
                   location: telemetryMatch.location || "Cluster Node",
                 };
@@ -235,9 +235,9 @@ export function LiveHeartbeatLog({
                   hostname: s.hostname,
                   ip: s.ip_address || "10.0.0.1",
                   status: s.status || "online",
-                  cpu: 28,
-                  memoryUsed: 16,
-                  memoryTotal: 64,
+                  cpu: typeof (s as any).cpu === "number" ? (s as any).cpu : null,
+                  memoryUsed: typeof (s as any).memoryUsed === "number" ? (s as any).memoryUsed : null,
+                  memoryTotal: typeof (s as any).memoryTotal === "number" ? (s as any).memoryTotal : null,
                   threats: 0,
                   location: "Cluster Infrastructure",
                 };
@@ -269,9 +269,9 @@ export function LiveHeartbeatLog({
                   hostname: (a as any).server_hostname || (a as any).hostname || "Connected Agent",
                   ip: (a as any).server_ip || (a as any).ip || "10.0.0.1",
                   status: (a as any).status || "online",
-                  cpu: 32,
-                  memoryUsed: 14,
-                  memoryTotal: 32,
+                  cpu: typeof (a as any).cpu === "number" ? (a as any).cpu : null,
+                  memoryUsed: typeof (a as any).memoryUsed === "number" ? (a as any).memoryUsed : null,
+                  memoryTotal: typeof (a as any).memoryTotal === "number" ? (a as any).memoryTotal : null,
                   threats: 0,
                   location: "Cluster Node",
                 };
@@ -287,13 +287,23 @@ export function LiveHeartbeatLog({
             );
             setConnected(isOnline);
 
-            const cpu = typeof target.cpu === "number" ? Math.round(target.cpu) : 28;
+            const hasCpu = typeof target.cpu === "number";
+            const hasMem = typeof target.memoryUsed === "number";
+            const cpu = hasCpu ? Math.round(target.cpu) : null;
             const mem =
-              target.memoryTotal && target.memoryUsed
+              hasMem && target.memoryTotal
                 ? Math.round((target.memoryUsed / target.memoryTotal) * 100)
                 : typeof target.memoryUsed === "number"
                   ? Math.round(target.memoryUsed)
-                  : 25;
+                  : null;
+
+            const telemetryDetails = [
+              cpu !== null ? `CPU: ${cpu}%` : null,
+              mem !== null ? `Mem: ${mem}%` : null,
+              `IP: ${target.ip}`,
+            ]
+              .filter(Boolean)
+              .join(" | ");
 
             const stateSnapshot = `${target.status}-${cpu}-${mem}-${target.threats || 0}`;
 
@@ -302,7 +312,7 @@ export function LiveHeartbeatLog({
               if (lastStateRef.current !== stateSnapshot || isPulseTick) {
                 appendEntry(
                   "HEARTBEAT",
-                  `Daemon pulse ACK: ${target.status.toUpperCase()} | CPU: ${cpu}% | Mem: ${mem}% | IP: ${target.ip}`
+                  `Daemon pulse ACK: ${target.status.toUpperCase()} | ${telemetryDetails}`
                 );
               }
 

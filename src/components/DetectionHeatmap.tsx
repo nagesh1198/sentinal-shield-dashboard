@@ -17,17 +17,26 @@ export function DetectionHeatmap() {
   const [cells, setCells] = useState<HeatmapCell[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadHeatmap = (silent = false) => {
+    if (!silent) setLoading(true);
     dashboardService
       .getHeatmap()
       .then((data) => {
         setCells(Array.isArray(data) ? data : []);
-        setLoading(false);
+        if (!silent) setLoading(false);
       })
       .catch((err) => {
         console.error("Heatmap load error:", err);
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    loadHeatmap(false);
+    const interval = setInterval(() => {
+      loadHeatmap(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Build a 2D grid from API data

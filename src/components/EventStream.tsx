@@ -52,9 +52,17 @@ export function EventStream() {
         setConnected(false);
         es.close();
       };
-
-      return () => es.close();
     }
+
+    // 5-second polling interval to keep recent alerts continuously updated
+    const interval = setInterval(() => {
+      loadRecentAlerts();
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      if (es) es.close();
+    };
   }, []);
 
   const loadRecentAlerts = () => {

@@ -88,3 +88,51 @@ test("INV-SRV-DECOYS-6: Infrastructure components must dynamically unify registe
     "Infrastructure components must query serverService.listServers dynamically"
   );
 });
+
+// INV-SRV-DECOYS-7: Infrastructure components must normalize exact decoy statuses (planted, tampered, cleaned_up)
+test("INV-SRV-DECOYS-7: Infrastructure page and ManagedInfrastructure must normalize exact decoy status categories", () => {
+  const infraContent = fs.readFileSync("src/app/infrastructure/page.tsx", "utf8");
+  const managedContent = fs.readFileSync("src/components/ManagedInfrastructure.tsx", "utf8");
+  assert.ok(
+    infraContent.includes("normalizeDecoyStatus") && infraContent.includes("getDecoyStatusBadge"),
+    "Infrastructure page must implement normalizeDecoyStatus and getDecoyStatusBadge"
+  );
+  assert.ok(
+    managedContent.includes("normalizeDecoyStatus") && managedContent.includes("getDecoyStatusBadge"),
+    "ManagedInfrastructure must implement normalizeDecoyStatus and getDecoyStatusBadge"
+  );
+  assert.ok(
+    infraContent.includes("cleaned_up") && infraContent.includes("tampered") && infraContent.includes("planted"),
+    "Infrastructure page must explicitly handle planted, tampered, and cleaned_up categories"
+  );
+});
+
+// INV-SRV-DECOYS-8: Decoys tab and server cards must display exact status counts and badges
+test("INV-SRV-DECOYS-8: Decoys tab and server cards must display exact counts and badges for planted, tampered, cleaned up", () => {
+  const infraContent = fs.readFileSync("src/app/infrastructure/page.tsx", "utf8");
+  assert.ok(
+    infraContent.includes("decoyStats.planted") && infraContent.includes("decoyStats.tampered") && infraContent.includes("decoyStats.cleanedUp"),
+    "Infrastructure page must compute decoyStats with separate planted, tampered, and cleanedUp counters"
+  );
+  assert.ok(
+    infraContent.includes("CLEANED UP") && infraContent.includes("TAMPERED") && infraContent.includes("PLANTED"),
+    "Infrastructure page Decoys tab must provide filter buttons for PLANTED, TAMPERED, and CLEANED UP"
+  );
+});
+
+// INV-SRV-DECOYS-9: src/app/decoys/page.tsx must support exact statuses and render exact badges
+test("INV-SRV-DECOYS-9: src/app/decoys/page.tsx must support exact statuses (all, planted, tampered, cleaned_up)", () => {
+  const decoysContent = fs.readFileSync("src/app/decoys/page.tsx", "utf8");
+  assert.ok(
+    decoysContent.includes("normalizeDecoyStatus") && decoysContent.includes("getDecoyStatusBadge"),
+    "Decoys page must implement normalizeDecoyStatus and getDecoyStatusBadge"
+  );
+  assert.ok(
+    decoysContent.includes('"planted"') && decoysContent.includes('"tampered"') && decoysContent.includes('"cleaned_up"'),
+    "Decoys page must support filter for planted, tampered, and cleaned_up"
+  );
+  assert.ok(
+    decoysContent.includes("stats.cleanedUp") && decoysContent.includes("stats.tampered"),
+    "Decoys page must display metrics for Cleaned Up and Tampered decoys"
+  );
+});

@@ -201,9 +201,11 @@ export default function AgentsPage() {
   };
 
   // ── Fetch Agents & Merge with Server Metadata Dynamically ──
-  const fetchAgents = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchAgents = useCallback(async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [directRegRes, dashboardRes, serversRes] = await Promise.all([
         agentService.listAgents().catch(() => [] as AgentRegistryResponse[]),
@@ -249,25 +251,24 @@ export default function AgentsPage() {
       setAgents(Array.from(agentMap.values()));
     } catch (err: any) {
       console.error("Failed fetching live agents:", err);
-      setError(err?.message || "Failed to load live agent fleet telemetry.");
-      setAgents([]);
+      if (isInitial) {
+        setError(err?.message || "Failed to load live agent fleet telemetry.");
+        setAgents([]);
+      }
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchAgents();
-  }, [fetchAgents]);
-
-  // Optional auto-refresh timer (30s)
-  useEffect(() => {
-    if (!autoRefresh) return;
+    fetchAgents(true);
     const interval = setInterval(() => {
-      fetchAgents();
-    }, 30000);
+      fetchAgents(false);
+    }, 5000);
     return () => clearInterval(interval);
-  }, [autoRefresh, fetchAgents]);
+  }, [fetchAgents]);
 
   // ── Column Visibility Toggling ──
   const toggleColumn = (key: ColumnKey) => {
@@ -516,7 +517,7 @@ export default function AgentsPage() {
 
           {/* Manual Refresh */}
           <button
-            onClick={fetchAgents}
+            onClick={() => fetchAgents(true)}
             disabled={loading}
             className="bg-surface-container-high text-primary px-4 py-2 rounded-xl text-xs font-semibold hover:bg-surface-container-highest transition-colors flex items-center gap-1.5 shadow-sm border border-outline-variant/15 active:scale-95"
           >
@@ -610,7 +611,7 @@ export default function AgentsPage() {
             <span>{error}</span>
           </div>
           <button
-            onClick={fetchAgents}
+            onClick={() => fetchAgents(true)}
             className="text-[10px] font-bold uppercase underline hover:no-underline ml-4"
           >
             Retry

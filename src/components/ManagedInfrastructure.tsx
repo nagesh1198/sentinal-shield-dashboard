@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Server, Grid, List, MoreVertical, RefreshCw, Loader2,
   Copy, Check, Shield, ChevronDown, ChevronUp, FileCode,
-  ShieldCheck, ShieldAlert, Sparkles, Activity
+  ShieldCheck, ShieldAlert, Sparkles, Activity, CheckCircle2, AlertTriangle
 } from "lucide-react";
 import { nodeService } from "@/services/nodeService";
 import { serverService } from "@/services/serverService";
@@ -59,35 +59,67 @@ function formatCpu(cpu: number | null): string {
   return `${cpu}%`;
 }
 
-// Fallback baseline planted decoys for demonstration when server has no backend decoys yet
-const DEMO_SERVER_DECOYS: Record<string, Partial<DecoyResponse>[]> = {
-  default: [
-    {
-      id: "decoy-demo-1",
-      file_path: "/etc/shadow.backup",
-      decoy_type: "FILE_TRIPWIRE",
-      status: "active",
-      planted_at: "2026-03-12T10:00:00Z",
-      last_verified: "Just now",
-    },
-    {
-      id: "decoy-demo-2",
-      file_path: "/var/secrets/aws_credentials.json",
-      decoy_type: "HONEYTOKEN",
-      status: "active",
-      planted_at: "2026-03-10T14:30:00Z",
-      last_verified: "10m ago",
-    },
-    {
-      id: "decoy-demo-3",
-      file_path: "/root/.ssh/id_rsa.old",
-      decoy_type: "SSH_TRAP",
-      status: "active",
-      planted_at: "2026-03-08T09:15:00Z",
-      last_verified: "1h ago",
-    },
-  ],
-};
+export type DecoyStatusCategory = "planted" | "tampered" | "cleaned_up" | "pending";
+
+export function normalizeDecoyStatus(status?: string): DecoyStatusCategory {
+  const s = (status || "").toLowerCase().trim();
+  if (["tampered", "compromised", "triggered", "tripped", "breached", "altered"].includes(s)) {
+    return "tampered";
+  }
+  if (["cleaned_up", "cleaned", "removed", "retired", "decommissioned", "inactive"].includes(s)) {
+    return "cleaned_up";
+  }
+  if (["pending", "verifying", "provisioning"].includes(s)) {
+    return "pending";
+  }
+  return "planted";
+}
+
+export function getDecoyStatusBadge(status?: string) {
+  const category = normalizeDecoyStatus(status);
+  const raw = (status || "planted").toLowerCase();
+
+  if (category === "tampered") {
+    return {
+      category,
+      label: raw === "tampered" ? "Tampered" : raw === "compromised" ? "Compromised" : "Tripped",
+      icon: ShieldAlert,
+      pillClass: "text-rose-700 bg-rose-50 border-rose-200",
+      dotClass: "bg-rose-500",
+      textClass: "text-rose-600",
+    };
+  }
+  if (category === "cleaned_up") {
+    return {
+      category,
+      label: raw === "cleaned_up" ? "Cleaned Up" : raw === "removed" ? "Removed" : "Cleaned",
+      icon: CheckCircle2,
+      pillClass: "text-slate-600 bg-slate-100 border-slate-300",
+      dotClass: "bg-slate-400",
+      textClass: "text-slate-600",
+    };
+  }
+  if (category === "pending") {
+    return {
+      category,
+      label: "Pending Verification",
+      icon: AlertTriangle,
+      pillClass: "text-amber-700 bg-amber-50 border-amber-200",
+      dotClass: "bg-amber-500",
+      textClass: "text-amber-600",
+    };
+  }
+  return {
+    category,
+    label: raw === "active" ? "Active" : "Planted",
+    icon: ShieldCheck,
+    pillClass: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    dotClass: "bg-emerald-500",
+    textClass: "text-emerald-600",
+  };
+}
+
+
 
 
 
@@ -113,9 +145,11 @@ export function ManagedInfrastructure() {
     setExpandedDecoysServerId((prev) => (prev === serverId ? null : serverId));
   };
 
-  const fetchNodes = () => {
-    setLoading(true);
-    setError(null);
+  const fetchNodes = (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     Promise.all([
       nodeService.getNodes().catch(() => [] as NodeInventory[]),
       serverService.listServers().catch(() => [] as ServerResponse[]),
@@ -132,20 +166,26 @@ export function ManagedInfrastructure() {
         ];
         setAgents(combinedAgents);
         setDecoys(Array.isArray(decoysData) ? decoysData : []);
-        setLoading(false);
+        if (!silent) setLoading(false);
       })
       .catch((err) => {
         console.error("Failed to load infrastructure telemetry:", err);
-        setError(err.message);
-        setLoading(false);
+        if (!silent) {
+          setError(err.message);
+          setLoading(false);
+        }
       });
   };
 
   useEffect(() => {
-    fetchNodes();
+    fetchNodes(false);
+    const interval = setInterval(() => {
+      fetchNodes(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Merge nodes, servers & agents to ensure all provisioned & online servers (including mock-ops-worker-01.internal) are represented
+  // Merge nodes, servers & agents to ensure all provisioned & online servers are represented
   const mergedServersList = useMemo(() => {
     const list: Array<{
       id: string;
@@ -162,14 +202,13 @@ export function ManagedInfrastructure() {
       plantedDecoys: DecoyResponse[];
     }> = [];
 
-    // Helper to resolve decoys for a server
+    // Helper to resolve decoys for a server (no mock fallback)
     const getDecoys = (sid: string, hname?: string) => {
-      const match = decoys.filter(
+      return decoys.filter(
         (d) =>
           d.server_id === sid ||
           (hname && d.server_id?.toLowerCase() === hname.toLowerCase())
       );
-      return match.length > 0 ? match : (DEMO_SERVER_DECOYS.default as DecoyResponse[]);
     };
 
     // 1. Process active nodes with live telemetry
@@ -200,10 +239,10 @@ export function ManagedInfrastructure() {
         hostname,
         ip: n.ip || matchingServer?.ip_address || "10.0.1.x",
         location: n.location || "Cluster Node",
-        status: n.status || "online",
-        cpu: typeof n.cpu === "number" ? n.cpu : null,
-        memoryUsed: typeof n.memoryUsed === "number" ? n.memoryUsed : null,
-        memoryTotal: typeof n.memoryTotal === "number" ? n.memoryTotal : null,
+        status: n.status || (isOnline ? "online" : "offline"),
+        cpu: isOnline && typeof n.cpu === "number" ? n.cpu : null,
+        memoryUsed: isOnline && typeof n.memoryUsed === "number" ? n.memoryUsed : null,
+        memoryTotal: isOnline && typeof n.memoryTotal === "number" ? n.memoryTotal : null,
         threats: n.threats || 0,
         isOnline,
         plantedDecoys: getDecoys(serverId, hostname),
@@ -217,6 +256,39 @@ export function ManagedInfrastructure() {
       );
       if (!alreadyListed) {
         const isOnline = ["online", "active", "healthy"].includes((s.status || "").toLowerCase());
+        const rawIp = (s.ip_address || "").split("/")[0].trim();
+        const matchingNode = nodes.find(
+          (n) =>
+            n.id === s.id ||
+            n.server_id === s.id ||
+            n.serverId === s.id ||
+            (n.hostname && n.hostname.toLowerCase() === s.hostname.toLowerCase()) ||
+            (rawIp && n.ip && (n.ip === s.ip_address || n.ip.split("/")[0] === rawIp))
+        );
+
+        const cpu = isOnline
+          ? matchingNode && typeof matchingNode.cpu === "number"
+            ? matchingNode.cpu
+            : typeof (s as any).cpu === "number"
+            ? (s as any).cpu
+            : null
+          : null;
+
+        const memoryUsed = isOnline
+          ? matchingNode && typeof matchingNode.memoryUsed === "number"
+            ? matchingNode.memoryUsed
+            : typeof (s as any).memoryUsed === "number"
+            ? (s as any).memoryUsed
+            : null
+          : null;
+
+        const memoryTotal = isOnline
+          ? matchingNode && typeof matchingNode.memoryTotal === "number"
+            ? matchingNode.memoryTotal
+            : typeof (s as any).memoryTotal === "number"
+            ? (s as any).memoryTotal
+            : null
+          : null;
 
         list.push({
           id: s.id,
@@ -225,9 +297,9 @@ export function ManagedInfrastructure() {
           ip: s.ip_address || "10.0.2.x",
           location: "Cloud VPC - Production",
           status: s.status || "online",
-          cpu: 28,
-          memoryUsed: 16,
-          memoryTotal: 64,
+          cpu,
+          memoryUsed,
+          memoryTotal,
           threats: 0,
           isOnline,
           plantedDecoys: getDecoys(s.id, s.hostname),
@@ -243,13 +315,41 @@ export function ManagedInfrastructure() {
       );
       if (!alreadyListed && serverId) {
         const matchingServer = servers.find((s) => s.id === serverId);
+        const matchingNode = nodes.find(
+          (n) => n.id === serverId || n.server_id === serverId || n.serverId === serverId || (n.id && n.id === a.id)
+        );
         const hostname =
           matchingServer?.hostname ||
           (a as any).server_hostname ||
           (a as any).hostname ||
+          matchingNode?.hostname ||
           serverId;
-        const ip = matchingServer?.ip_address || (a as any).ip || (a as any).server_ip || "10.0.1.x";
+        const ip = matchingServer?.ip_address || matchingNode?.ip || (a as any).ip || (a as any).server_ip || "10.0.1.x";
         const isOnline = ["online", "active", "healthy"].includes((a.status || "online").toLowerCase());
+
+        const cpu = isOnline
+          ? matchingNode && typeof matchingNode.cpu === "number"
+            ? matchingNode.cpu
+            : typeof (a as any).cpu === "number"
+            ? (a as any).cpu
+            : null
+          : null;
+
+        const memoryUsed = isOnline
+          ? matchingNode && typeof matchingNode.memoryUsed === "number"
+            ? matchingNode.memoryUsed
+            : typeof (a as any).memoryUsed === "number"
+            ? (a as any).memoryUsed
+            : null
+          : null;
+
+        const memoryTotal = isOnline
+          ? matchingNode && typeof matchingNode.memoryTotal === "number"
+            ? matchingNode.memoryTotal
+            : typeof (a as any).memoryTotal === "number"
+            ? (a as any).memoryTotal
+            : null
+          : null;
 
         list.push({
           id: a.id || serverId,
@@ -258,9 +358,9 @@ export function ManagedInfrastructure() {
           ip,
           location: "Cluster Node - Production",
           status: a.status || "online",
-          cpu: 32,
-          memoryUsed: 14,
-          memoryTotal: 32,
+          cpu,
+          memoryUsed,
+          memoryTotal,
           threats: 0,
           isOnline,
           plantedDecoys: getDecoys(serverId, hostname),
@@ -290,7 +390,7 @@ export function ManagedInfrastructure() {
 
         <div className="flex gap-1.5 items-center">
           <button
-            onClick={fetchNodes}
+            onClick={() => fetchNodes()}
             className="p-1.5 bg-surface-container-low rounded-lg hover:bg-surface-container-high transition-colors"
             title="Refresh infrastructure and planted decoys"
           >
@@ -326,13 +426,13 @@ export function ManagedInfrastructure() {
           </div>
         )}
 
-        {mergedServersList.map((server) => {
+        {mergedServersList.map((server, sIdx) => {
           const isExpanded = expandedDecoysServerId === server.serverId;
           const serverId = server.serverId;
 
           return (
             <div
-              key={server.id}
+              key={`${server.id || server.serverId}-${sIdx}`}
               className="bg-surface-container-lowest rounded-xl p-4 shadow-sm border border-outline-variant/10 group hover:shadow-md transition-all space-y-3"
             >
               <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -409,14 +509,69 @@ export function ManagedInfrastructure() {
                       {server.threats > 0 ? `${server.threats} Pending` : "0 Detected"}
                     </p>
                   </div>
-
-                    <button className="text-primary opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-primary/5 rounded-full">
-                      <MoreVertical className="w-4 h-4" />
+                  {/* Decoys Status Pill */}
+                  <div className="text-left">
+                    <p className="text-[9px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-0.5">
+                      Decoys
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => toggleExpandDecoys(serverId, e)}
+                      className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors"
+                      title="View decoys on this server"
+                    >
+                      <Shield className="w-3 h-3 text-slate-600" />
+                      <span>{server.plantedDecoys.length}</span>
+                      {isExpanded ? <ChevronUp className="w-3 h-3 text-slate-500" /> : <ChevronDown className="w-3 h-3 text-slate-500" />}
                     </button>
                   </div>
+
+                  <button className="text-primary opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-primary/5 rounded-full">
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-            );
+
+              {/* Expandable Decoy Canaries Drawer */}
+              {isExpanded && (
+                <div className="pt-2 border-t border-outline-variant/10 space-y-1.5 animate-in fade-in duration-150">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="font-semibold text-slate-700 flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5 text-slate-600" /> Deception Assets ({server.plantedDecoys.length}):
+                    </span>
+                    <span className="text-[9px] text-slate-500">
+                      Exact status breakdown
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {server.plantedDecoys.map((decoy, dIdx) => {
+                      const badge = getDecoyStatusBadge(decoy.status);
+                      const BadgeIcon = badge.icon;
+                      return (
+                        <div
+                          key={decoy.id || dIdx}
+                          className="flex items-center justify-between gap-2 bg-slate-50 rounded-md px-2.5 py-1 text-[10px] border border-slate-200/70"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <FileCode className="w-3 h-3 text-slate-500 shrink-0" />
+                            <span className="font-mono text-slate-800 truncate select-all" title={decoy.file_path}>
+                              {decoy.file_path}
+                            </span>
+                          </div>
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 border ${badge.pillClass}`}
+                          >
+                            <BadgeIcon className="w-2.5 h-2.5" />
+                            {badge.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
         })}
       </div>
     </section>

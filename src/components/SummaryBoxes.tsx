@@ -10,24 +10,32 @@ export function SummaryBoxes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSummary = () => {
-    setLoading(true);
-    setError(null);
+  const fetchSummary = (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     dashboardService
       .getSummary()
       .then((data) => {
         setMetrics(data);
-        setLoading(false);
+        if (!silent) setLoading(false);
       })
       .catch((err) => {
         console.error("Failed to load summary:", err);
-        setError(err.message);
-        setLoading(false);
+        if (!silent) {
+          setError(err.message);
+          setLoading(false);
+        }
       });
   };
 
   useEffect(() => {
-    fetchSummary();
+    fetchSummary(false);
+    const interval = setInterval(() => {
+      fetchSummary(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Display values from API or show dashes while loading
@@ -47,7 +55,7 @@ export function SummaryBoxes() {
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1">Failed to load KPI data: {error}</span>
           <button
-            onClick={fetchSummary}
+            onClick={() => fetchSummary()}
             className="flex items-center gap-1 text-primary hover:underline font-semibold"
           >
             <RefreshCw className="w-3 h-3" /> Retry

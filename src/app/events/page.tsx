@@ -159,7 +159,7 @@ export default function EventsPage() {
       } catch {
         // Silent retry on next polling cycle
       }
-    }, 8000);
+    }, 5000);
 
     return () => clearInterval(pollTimer);
   }, [connected]);

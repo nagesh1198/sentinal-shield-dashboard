@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { History, ShieldCheck, Lock, AlertTriangle, Loader2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { History, ShieldCheck, Lock, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
 import { decoyService } from "@/services/decoyService";
 import type { DecoyResponse } from "@/lib/types";
 
@@ -14,11 +14,14 @@ function getBasename(path: string): string {
 
 function getStatusIcon(status: string) {
   const s = status.toLowerCase();
-  if (s === "active" || s === "healthy" || s === "verified") {
+  if (s === "active" || s === "healthy" || s === "verified" || s === "planted") {
     return <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />;
   }
-  if (s === "compromised" || s === "triggered" || s === "error") {
+  if (s === "compromised" || s === "triggered" || s === "error" || s === "tampered") {
     return <AlertTriangle className="w-3.5 h-3.5 text-red-500 animate-pulse" />;
+  }
+  if (s === "cleaned_up" || s === "cleaned" || s === "removed") {
+    return <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" />;
   }
   return <Lock className="w-3.5 h-3.5 text-on-surface-variant" />;
 }
@@ -28,19 +31,29 @@ export function ForensicsVault() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchDecoys = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     decoyService
       .listDecoys()
       .then((data) => {
         setDecoys(Array.isArray(data) ? data : []);
-        setLoading(false);
+        setError(null);
+        if (!silent) setLoading(false);
       })
       .catch((err) => {
-        console.error("Forensics Vault load error (using fallback):", err);
+        console.error("Forensics Vault load error:", err);
         setError(err.message);
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    fetchDecoys(false);
+    const interval = setInterval(() => {
+      fetchDecoys(true);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchDecoys]);
 
   return (
     <div className="bg-surface-container-low rounded-xl p-4 border border-outline-variant/10">
@@ -58,17 +71,9 @@ export function ForensicsVault() {
             <span className="text-[10px] text-on-surface-variant">Syncing vaults...</span>
           </div>
         ) : error ? (
-          /* Graceful fallback to local simulated logs if API fails */
-          <>
-            <div className="bg-white p-2.5 rounded-lg flex justify-between items-center shadow-sm border border-outline-variant/5">
-              <span className="text-[10px] font-mono text-on-surface">AUDIT_LOG_230921.tar.gz</span>
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-            <div className="bg-white p-2.5 rounded-lg flex justify-between items-center shadow-sm border border-outline-variant/5">
-              <span className="text-[10px] font-mono text-on-surface">TCP_DUMP_02.pcap</span>
-              <Lock className="w-3.5 h-3.5 text-on-surface-variant" />
-            </div>
-          </>
+          <div className="text-center py-4 text-[10px] text-error bg-error/5 rounded-lg border border-error/10 px-3">
+            Failed to sync forensics: {error}
+          </div>
         ) : decoys.length === 0 ? (
           /* Empty state for a new tenant */
           <div className="text-center py-6 border border-dashed border-outline-variant/30 rounded-lg bg-surface-container-lowest">
