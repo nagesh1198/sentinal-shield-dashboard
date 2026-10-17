@@ -184,6 +184,14 @@ export default function InfrastructurePage() {
                 ? Math.round(n.memoryUsed)
                 : 0;
 
+            const matchingServer = servers.find(
+              (s) =>
+                s.id === n.id ||
+                s.hostname?.toLowerCase() === n.id.toLowerCase() ||
+                (s.ip_address && n.ip && s.ip_address === n.ip)
+            );
+            const hostname = matchingServer?.hostname || n.hostname || n.id;
+
             return (
               <div key={n.id} className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group">
                 <div className="flex justify-between items-start mb-4">
@@ -193,8 +201,17 @@ export default function InfrastructurePage() {
                       <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${statusColor[statusKey] || "bg-gray-400"}`} />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-on-surface">{n.id}</p>
-                      <p className="text-[10px] text-on-surface-variant">{n.location || "Cluster Node"} | {n.ip}</p>
+                      <h3 className="text-sm font-bold text-on-surface leading-tight">
+                        {hostname}
+                      </h3>
+                      <p className="text-[11px] font-mono font-semibold text-primary mt-0.5">
+                        {n.id}
+                      </p>
+                      <p className="text-[10px] text-on-surface-variant flex items-center gap-1.5 mt-1">
+                        <span>{n.location || "Cluster Node"}</span>
+                        <span>•</span>
+                        <span className="font-mono">{n.ip}</span>
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

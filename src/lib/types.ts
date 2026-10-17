@@ -91,6 +91,7 @@ export interface MitigatePayload {
 // ─── Nodes ───
 export interface NodeInventory {
   id: string;
+  hostname?: string;
   location: string;
   ip: string;
   status: string;
