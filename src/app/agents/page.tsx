@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { agentService } from "@/services/agentService";
 import { serverService } from "@/services/serverService";
 import { usePermissions } from "@/lib/rbac";
 import type { AgentResponse, AgentRegistryResponse, ServerResponse } from "@/lib/types";
+import { downloadCSV, generateCSV, escapeCSVField } from "@/lib/csvExport";
 import {
   Bot,
   RefreshCw,
@@ -192,6 +193,20 @@ export default function AgentsPage() {
   const [detailTab, setDetailTab] = useState<"proofs" | "server" | "actions">("proofs");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Copy helper
   const handleCopy = (text: string, id: string) => {
@@ -420,34 +435,47 @@ export default function AgentsPage() {
   const exportToCSV = () => {
     const headers = [
       "Agent ID",
+      "Fleet Status",
       "Server Hostname",
       "Server ID",
       "Server IP",
-      "Status",
-      "Version",
+      "Server Location",
+      "Agent Version",
       "Git Commit",
+      "Capabilities Verification",
       "Last Connected",
       "Enrolled Date",
     ];
-    const rows = sortedAgents.map((a) => [
-      `"${a.id}"`,
-      `"${a.server_hostname || a.server_id}"`,
-      `"${a.server_id}"`,
-      `"${a.server_ip || ""}"`,
-      `"${a.status}"`,
-      `"${a.version || ""}"`,
-      `"${a.git_commit || ""}"`,
-      `"${a.last_connected_at || ""}"`,
-      `"${a.created_at || ""}"`,
-    ]);
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `sentinel-agent-fleet-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+
+    const rows = sortedAgents.map((a) => {
+      const isVerified =
+        a.capabilities_proof && (a.capabilities_proof as any).verified !== false
+          ? "Verified"
+          : "Unverified";
+      const location = (a.server_specs?.location as string) || "";
+      return [
+        a.id,
+        a.status,
+        a.server_hostname || a.server_id,
+        a.server_id,
+        a.server_ip || "",
+        location,
+        a.version || "",
+        a.git_commit || "",
+        isVerified,
+        a.last_connected_at || "",
+        a.created_at || "",
+      ];
+    });
+
+    const csvContent = generateCSV(headers, rows);
+    const filename = `sentinel-agent-fleet-${new Date().toISOString().slice(0, 10)}.csv`;
+    const success = downloadCSV(filename, csvContent);
+    if (success) {
+      setExportSuccess("CSV Exported!");
+      setTimeout(() => setExportSuccess(null), 3000);
+    }
+    setShowExportMenu(false);
   };
 
   const exportToJSON = () => {
@@ -457,8 +485,14 @@ export default function AgentsPage() {
     const link = document.createElement("a");
     link.href = url;
     link.download = `sentinel-agent-fleet-${new Date().toISOString().slice(0, 10)}.json`;
+    link.style.display = "none";
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setExportSuccess("JSON Exported!");
+    setTimeout(() => setExportSuccess(null), 3000);
+    setShowExportMenu(false);
   };
 
   // ── Density Style Rules ──
@@ -526,25 +560,40 @@ export default function AgentsPage() {
           </button>
 
           {/* Export Dropdown */}
-          <div className="relative group">
-            <button className="bg-primary text-white px-3.5 py-2 rounded-xl text-xs font-semibold hover:bg-primary-container transition-all flex items-center gap-1.5 shadow-md shadow-primary/20">
-              <Download className="w-3.5 h-3.5" />
-              Export
+          <div ref={exportMenuRef} className="relative">
+            <button
+              onClick={() => setShowExportMenu((prev) => !prev)}
+              className="bg-primary text-white px-3.5 py-2 rounded-xl text-xs font-semibold hover:bg-primary-container transition-all flex items-center gap-1.5 shadow-md shadow-primary/20 cursor-pointer"
+              title="Export agent fleet data"
+            >
+              {exportSuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-300" />
+                  <span className="text-emerald-100 font-bold">{exportSuccess}</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  Export
+                </>
+              )}
             </button>
-            <div className="absolute right-0 mt-1 w-44 bg-surface-container-lowest border border-outline-variant/20 rounded-xl shadow-xl py-1.5 hidden group-hover:block z-30 animate-[fadeIn_0.15s_ease-out]">
-              <button
-                onClick={exportToCSV}
-                className="w-full text-left px-3.5 py-2 text-xs text-on-surface hover:bg-surface-container-low flex items-center gap-2"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Export as CSV
-              </button>
-              <button
-                onClick={exportToJSON}
-                className="w-full text-left px-3.5 py-2 text-xs text-on-surface hover:bg-surface-container-low flex items-center gap-2"
-              >
-                <FileCode className="w-3.5 h-3.5 text-blue-600" /> Export as JSON
-              </button>
-            </div>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-surface-container-lowest border border-outline-variant/20 rounded-xl shadow-xl py-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                <button
+                  onClick={exportToCSV}
+                  className="w-full text-left px-3.5 py-2 text-xs text-on-surface hover:bg-surface-container-low flex items-center gap-2 cursor-pointer font-medium"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Export as CSV
+                </button>
+                <button
+                  onClick={exportToJSON}
+                  className="w-full text-left px-3.5 py-2 text-xs text-on-surface hover:bg-surface-container-low flex items-center gap-2 cursor-pointer font-medium"
+                >
+                  <FileCode className="w-3.5 h-3.5 text-blue-600" /> Export as JSON
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
