@@ -34,7 +34,7 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      await login(email, password, companySlug.trim() || "mock-acme");
+      await login(email, password, companySlug.trim());
       router.push("/");
     } catch (err) {
       setErrorMessage(
@@ -95,13 +95,10 @@ export default function LoginPage() {
             {/* Organization / Tenant Field */}
             <div className="space-y-1.5">
               <label
-                className="text-xs font-semibold text-on-surface-variant flex items-center justify-between"
+                className="text-xs font-semibold text-on-surface-variant"
                 htmlFor="companySlug"
               >
-                <span>Organization (Tenant)</span>
-                <span className="text-[10px] text-primary font-mono font-bold bg-primary/10 px-2 py-0.5 rounded-full">
-                  mock-acme
-                </span>
+                Organization (Tenant)
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-on-surface-variant/40">
@@ -111,7 +108,7 @@ export default function LoginPage() {
                   id="companySlug"
                   type="text"
                   required
-                  placeholder="mock-acme"
+                  placeholder="Enter organization slug (e.g. acme-corp)"
                   value={companySlug}
                   onChange={(e) => setCompanySlug(e.target.value)}
                   disabled={isLoading}
