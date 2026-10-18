@@ -11,6 +11,9 @@ export function getRolePermissions(role: string): Permission[] {
   if (normalized in ROLE_PERMISSIONS) {
     return ROLE_PERMISSIONS[normalized];
   }
+  if (normalized.includes("owner") && /(tenant|client|organi[sz]ation)/.test(normalized)) {
+    return ROLE_PERMISSIONS["tenant-admin"];
+  }
   // Fallbacks for display role names
   if (normalized.includes("platform") || normalized.includes("owner")) {
     return ROLE_PERMISSIONS.platform_owner;

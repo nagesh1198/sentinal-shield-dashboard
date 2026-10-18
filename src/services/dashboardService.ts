@@ -26,6 +26,12 @@ export const dashboardService = {
       notes: notes || null,
     } satisfies MitigatePayload),
 
+  /** POST /api/v1/dashboard/alerts/{alert_id}/quarantine */
+  quarantineAlert: (alertId: string, killParent: boolean) =>
+    api.post<void>(`/api/v1/dashboard/alerts/${encodeURIComponent(alertId)}/quarantine`, {
+      kill_parent: killParent,
+    }),
+
   /** SSE stream: GET /api/v1/dashboard/alerts/stream */
   getAlertStream: () => createEventSource("/api/v1/dashboard/alerts/stream"),
 

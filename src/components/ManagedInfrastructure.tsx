@@ -26,7 +26,7 @@ function statusBadge(status: string) {
   if (s === "online" || s === "active" || s === "healthy") {
     return (
       <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Agent Online
       </span>
     );
   }
@@ -389,7 +389,7 @@ export function ManagedInfrastructure() {
           </h2>
           <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            {onlineServersCount} Servers Online
+            {onlineServersCount} Agent Server{onlineServersCount === 1 ? "" : "s"}
           </span>
         </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   AlertTriangle, Filter, Search, Clock, ChevronDown,
   Info, Loader2, Server, ShieldCheck, Crosshair,
@@ -12,6 +12,8 @@ import { dashboardService } from "@/services/dashboardService";
 import { serverService } from "@/services/serverService";
 import { nodeService } from "@/services/nodeService";
 import { decoyService } from "@/services/decoyService";
+import { getQuarantineDisplayStatus, getQuarantineKillParent } from "@/lib/eventActions";
+import { usePermissions } from "@/lib/rbac";
 import type { AlertPayload, ServerResponse, NodeInventory, DecoyResponse } from "@/lib/types";
 
 const badgeColor: Record<string, string> = {
@@ -73,6 +75,8 @@ function getAlertDescription(alert: AlertPayload): string {
 }
 
 export default function EventsPage() {
+  const { can } = usePermissions();
+  const canRespond = can("security.respond");
   const [events, setEvents] = useState<AlertPayload[]>([]);
   const [servers, setServers] = useState<ServerResponse[]>([]);
   const [nodes, setNodes] = useState<NodeInventory[]>([]);
@@ -86,8 +90,10 @@ export default function EventsPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [eventDecoys, setEventDecoys] = useState<Record<string, DecoyResponse | null>>({});
   const [loadingDecoyIds, setLoadingDecoyIds] = useState<Set<string>>(new Set());
-  const [mitigatingId, setMitigatingId] = useState<string | null>(null);
-  const [mitigatedIds, setMitigatedIds] = useState<Set<string>>(new Set());
+  const pendingActionIds = useRef<Set<string>>(new Set());
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [quarantineRequestedIds, setQuarantineRequestedIds] = useState<Set<string>>(new Set());
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [copiedHash, setCopiedHash] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
 
@@ -125,7 +131,12 @@ export default function EventsPage() {
         try {
           const alert: AlertPayload = JSON.parse(event.data);
           setEvents((prev) => {
-            if (prev.some((e) => e.id === alert.id)) return prev;
+            const existingIndex = prev.findIndex((e) => e.id === alert.id);
+            if (existingIndex >= 0) {
+              const next = [...prev];
+              next[existingIndex] = alert;
+              return next;
+            }
             return [alert, ...prev].slice(0, 200);
           });
         } catch {
@@ -152,8 +163,8 @@ export default function EventsPage() {
           setEvents((prev) => {
             const existingIds = new Set(prev.map((e) => e.id));
             const newEntries = freshAlerts.filter((a) => a.id && !existingIds.has(a.id));
-            if (newEntries.length === 0) return prev;
-            return [...newEntries, ...prev].slice(0, 200);
+            const freshById = new Map(freshAlerts.map((a) => [a.id, a]));
+            return [...newEntries, ...prev.map((e) => freshById.get(e.id) || e)].slice(0, 200);
           });
         }
       } catch {
@@ -273,16 +284,31 @@ export default function EventsPage() {
     }
   };
 
-  const handleMitigate = async (alertId: string, event: React.MouseEvent) => {
+  const handleQuarantine = async (alertId: string, killParent: boolean, event: React.MouseEvent) => {
     event.stopPropagation();
-    setMitigatingId(alertId);
+    const currentAlert = events.find((item) => item.id === alertId);
+    if (!canRespond || !currentAlert || pendingActionIds.current.has(alertId)) return;
+    if (getQuarantineDisplayStatus(currentAlert, quarantineRequestedIds.has(alertId))) return;
+    if (getQuarantineKillParent(currentAlert, eventDecoys[alertId]) !== killParent) return;
+    pendingActionIds.current.add(alertId);
+    setPendingIds((prev) => new Set(prev).add(alertId));
+    setActionErrors((prev) => {
+      const next = { ...prev };
+      delete next[alertId];
+      return next;
+    });
     try {
-      await dashboardService.mitigateAlert(alertId, "Manually mitigated from SOC Events Feed");
-      setMitigatedIds((prev) => new Set(prev).add(alertId));
-    } catch (err: any) {
-      console.error("Mitigate failed:", err.message);
+      await dashboardService.quarantineAlert(alertId, killParent);
+      setQuarantineRequestedIds((prev) => new Set(prev).add(alertId));
+    } catch {
+      setActionErrors((prev) => ({ ...prev, [alertId]: "Quarantine failed. Please try again." }));
     } finally {
-      setMitigatingId(null);
+      pendingActionIds.current.delete(alertId);
+      setPendingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(alertId);
+        return next;
+      });
     }
   };
 
@@ -433,7 +459,8 @@ export default function EventsPage() {
             const isExpanded = expandedIds.has(e.id);
             const decoy = eventDecoys[e.id];
             const isLoadingDecoy = loadingDecoyIds.has(e.id);
-            const isMitigated = mitigatedIds.has(e.id);
+            const quarantineStatus = getQuarantineDisplayStatus(e, quarantineRequestedIds.has(e.id));
+            const killParent = getQuarantineKillParent(e, decoy);
 
             return (
               <div
@@ -484,10 +511,10 @@ export default function EventsPage() {
                         </span>
                       )}
 
-                      {isMitigated && (
-                        <span className="flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          <ShieldCheck className="w-3 h-3 text-emerald-700" />
-                          MITIGATED
+                      {quarantineStatus && (
+                        <span className={`flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md border ${quarantineStatus === "requested" ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"}`}>
+                          {quarantineStatus === "requested" ? <Clock className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3 text-emerald-700" />}
+                          {quarantineStatus === "requested" ? "QUARANTINE REQUESTED" : "QUARANTINED"}
                         </span>
                       )}
                     </div>
@@ -636,18 +663,20 @@ export default function EventsPage() {
                       </pre>
                     </div>
 
-                    {/* Quick Mitigation Action Bar */}
+                    {/* Alert response action bar */}
                     <div className="flex justify-between items-center pt-2">
                       <span className="text-[10px] font-mono text-on-surface-variant">Alert ID: {e.id}</span>
                       <div className="flex gap-2">
-                        {!isMitigated && (
+                        {killParent !== null && !quarantineStatus && (
                           <button
-                            onClick={(ev) => handleMitigate(e.id, ev)}
-                            disabled={mitigatingId === e.id}
+                            type="button"
+                            onClick={(ev) => handleQuarantine(e.id, killParent, ev)}
+                            disabled={pendingIds.has(e.id) || !canRespond || !e.id}
+                            title={!canRespond ? "Requires security.respond permission" : undefined}
                             className="px-4 py-1.5 rounded-full text-xs font-bold bg-error text-white hover:bg-error/90 transition-colors flex items-center gap-1.5 shadow-sm shadow-error/20 disabled:opacity-50"
                           >
-                            {mitigatingId === e.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldAlert className="w-3 h-3" />}
-                            Mitigate Threat
+                            {pendingIds.has(e.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldAlert className="w-3 h-3" />}
+                            {pendingIds.has(e.id) ? "Quarantining..." : "Quarantine"}
                           </button>
                         )}
                         <button
@@ -658,6 +687,7 @@ export default function EventsPage() {
                         </button>
                       </div>
                     </div>
+                    {actionErrors[e.id] && <p role="alert" className="text-xs text-error">{actionErrors[e.id]}</p>}
                   </div>
                 )}
               </div>

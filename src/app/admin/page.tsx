@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { KillSwitchPanel } from "@/components/KillSwitchPanel";
 import { AddServerModal } from "@/components/AddServerModal";
 import { adminService } from "@/services/adminService";
 import { nodeService } from "@/services/nodeService";
@@ -17,7 +16,8 @@ import {
 } from "lucide-react";
 
 export default function AdminPage() {
-  const { isPlatformAdmin, role } = usePermissions();
+  const { user, role } = usePermissions();
+  const isPlatformAdmin = role === "platform_owner";
   const [admins, setAdmins] = useState<AdminUserResponse[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [nodes, setNodes] = useState<NodeInventory[]>([]);
@@ -58,7 +58,7 @@ export default function AdminPage() {
         adminService.listAdmins().catch(() => [] as AdminUserResponse[]),
         adminService.getAuditLogs().catch(() => [] as AuditLogEntry[]),
         nodeService.getNodes().catch(() => [] as NodeInventory[]),
-        adminService.listClients().catch(() => [] as Record<string, any>[]),
+        isPlatformAdmin ? adminService.listClients().catch(() => [] as Record<string, any>[]) : Promise.resolve([] as Record<string, any>[]),
       ]);
       setAdmins(Array.isArray(adminsData) ? adminsData : []);
       setAuditLogs(Array.isArray(logsData) ? logsData : []);
@@ -70,11 +70,11 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isPlatformAdmin]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (user) loadData();
+  }, [user, loadData]);
 
   const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,6 +100,7 @@ export default function AdminPage() {
 
   const handleProvisionTenant = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isPlatformAdmin) return;
     setProvisioning(true);
     setProvisionError(null);
     try {
@@ -119,6 +120,7 @@ export default function AdminPage() {
   };
 
   const handleInspectClient = async (slug: string) => {
+    if (!isPlatformAdmin) return;
     setInspectingLoading(true);
     try {
       const data = await adminService.getClient(slug);
@@ -201,6 +203,7 @@ export default function AdminPage() {
       )}
 
       {/* Cross-Tenant Client Organizations (Visible to Platform Admins) */}
+      {isPlatformAdmin && (
       <section className="bg-white rounded-2xl p-6 border border-outline-variant/10 shadow-sm mb-6">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2.5">
@@ -284,11 +287,7 @@ export default function AdminPage() {
           })}
         </div>
       </section>
-
-      {/* Kill Switch Panel */}
-      <div className="bg-white rounded-2xl p-6 border border-outline-variant/10 shadow-sm mb-6">
-        <KillSwitchPanel />
-      </div>
+      )}
 
       {/* Lower Grid — Telemetry + Analysts + Audit */}
       <div className="grid grid-cols-12 gap-6">
@@ -514,7 +513,7 @@ export default function AdminPage() {
       )}
 
       {/* Provision Client Tenant Modal */}
-      {showProvisionModal && (
+      {isPlatformAdmin && showProvisionModal && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={(e) => e.target === e.currentTarget && setShowProvisionModal(false)}
@@ -590,7 +589,7 @@ export default function AdminPage() {
       )}
 
       {/* Client Inspection Drawer/Modal */}
-      {inspectingClient && (
+      {isPlatformAdmin && inspectingClient && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={(e) => e.target === e.currentTarget && setInspectingClient(null)}
@@ -671,7 +670,7 @@ export default function AdminPage() {
 
       {/* Global Admin Server Provisioning Wizard */}
       <AddServerModal
-        isOpen={showAddServerModal}
+        isOpen={isPlatformAdmin && showAddServerModal}
         onClose={() => setShowAddServerModal(false)}
         initialTenant={targetServerTenant}
         onSuccess={loadData}

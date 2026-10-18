@@ -88,6 +88,7 @@ export interface AlertPayload {
   severity: string;
   details: Record<string, unknown>;
   detected_at: string;
+  status?: string;
 }
 
 export interface PagedAlerts {

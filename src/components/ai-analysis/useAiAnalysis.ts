@@ -88,8 +88,8 @@ export function useAiAnalysis() {
 
       const asstId = uid();
       setNotice(null);
-      const newUserMsg: AnalysisMessage = { id: uid(), role: "user", content: question, status: "done", tools: [], createdAt: Date.now() };
-      const newAsstMsg: AnalysisMessage = { id: asstId, role: "assistant", content: "", status: "streaming", phase: "collecting", question, tools: [], createdAt: Date.now() };
+      const newUserMsg: ChatMessage = { id: uid(), role: "user", content: question, status: "done", tools: [], createdAt: Date.now() };
+      const newAsstMsg: ChatMessage = { id: asstId, role: "assistant", content: "", status: "streaming", phase: "collecting", question, tools: [], createdAt: Date.now() };
 
       if (!isFollowup) {
         setMessages([newUserMsg, newAsstMsg]);
@@ -199,7 +199,7 @@ export function useAiAnalysis() {
       const priorResult = isFollowup ? activeResultRef.current : null;
       const priorSql = isFollowup ? activeSqlRef.current : (sql || null);
 
-      const newUserMsg: AnalysisMessage = {
+      const newUserMsg: ChatMessage = {
         id: uid(),
         role: "user",
         content: userPrompt,
@@ -208,7 +208,7 @@ export function useAiAnalysis() {
         createdAt: Date.now(),
       };
 
-      const newAsstMsg: AnalysisMessage = {
+      const newAsstMsg: ChatMessage = {
         id: asstId,
         role: "assistant",
         content: "",

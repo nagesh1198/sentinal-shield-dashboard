@@ -9,6 +9,9 @@ export function normalizeRole(roleStr: unknown): UserRole | null {
   if (typeof roleStr !== "string") return null;
   const r = roleStr.trim().toLowerCase();
   if (r in ROLE_PERMISSIONS) return r as UserRole;
+  if (r.includes("owner") && /(tenant|client|organi[sz]ation)/.test(r)) {
+    return "tenant-admin";
+  }
   if (r.includes("platform") || r.includes("owner") || r.includes("superadmin") || r.includes("global")) {
     return "platform_owner";
   }

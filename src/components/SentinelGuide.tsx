@@ -134,20 +134,7 @@ const TOUR_STEPS: TourStep[] = [
     scrollIntoView: false,
   },
 
-  // 8. Navigation: Automation & Playbooks
-  {
-    target: "[data-tour='nav-automation']",
-    title: "Automated Incident Playbooks",
-    badge: "SOAR Automation",
-    description:
-      "Configure automated containment playbooks: automatically isolate compromised IPs, revoke compromised API keys, and trigger SIEM webhooks in milliseconds.",
-    icon: "⚡",
-    expression: "happy",
-    placement: "sidebar-item",
-    scrollIntoView: false,
-  },
-
-  // 9. Navigation: Settings & Access
+  // 8. Navigation: Settings & Access
   {
     target: "[data-tour='nav-settings']",
     title: "Settings & System Admin",

@@ -88,13 +88,14 @@ test("INV-STREAM-6: src/app/events/page.tsx must guard alert mapping against und
   );
 });
 
-// INV-STREAM-7: src/app/events/page.tsx must implement fallback polling when disconnected and de-duplicate
-test("INV-STREAM-7: src/app/events/page.tsx must de-duplicate stream alerts and poll when disconnected", () => {
+// INV-STREAM-7: src/app/events/page.tsx must refresh an existing alert without duplicating it, and poll when disconnected
+test("INV-STREAM-7: src/app/events/page.tsx must refresh existing stream alerts and poll when disconnected", () => {
   const content = fs.readFileSync("src/app/events/page.tsx", "utf8");
   assert.ok(
-    content.includes("prev.some((e) => e.id === alert.id)") ||
-    content.includes("prev.some(e => e.id === alert.id)"),
-    "events/page.tsx must de-duplicate incoming SSE alerts by id"
+    content.includes("prev.findIndex((e) => e.id === alert.id)") &&
+    content.includes("next[existingIndex] = alert") &&
+    content.includes("return [alert, ...prev]"),
+    "events/page.tsx must replace matching SSE alerts by id and add only new alerts"
   );
   assert.ok(
     content.includes("setInterval") && (content.includes("connected") || content.includes("pollTimer")),

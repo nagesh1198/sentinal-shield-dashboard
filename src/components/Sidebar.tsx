@@ -8,7 +8,7 @@ import type { Permission } from "@/lib/types";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, BellRing, Radar, FileText,
-  Server, Settings, Shield, HelpCircle, LogOut,
+  Server, Shield, HelpCircle, LogOut,
   SlidersHorizontal, Bot, KeyRound, Orbit, Sparkles,
 } from "lucide-react";
 
@@ -16,13 +16,11 @@ const navMain: { href: string; icon: typeof FileText; label: string; permission?
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/events", icon: BellRing, label: "Events" },
   { href: "/detections", icon: Radar, label: "Detections" },
-  { href: "/logs", icon: FileText, label: "Logs" },
   { href: "/ai-analysis", icon: Sparkles, label: "AI Analysis", permission: "ai.analyze" },
   { href: "/infrastructure", icon: Server, label: "Infrastructure" },
   { href: "/holistic", icon: Orbit, label: "Holistic View" },
   { href: "/agents", icon: Bot, label: "Agents" },
   { href: "/keys", icon: KeyRound, label: "API Keys" },
-  { href: "/automation", icon: Settings, label: "Automation" },
   { href: "/admin", icon: Shield, label: "Admin" },
   { href: "/settings", icon: SlidersHorizontal, label: "Settings" },
 ];
