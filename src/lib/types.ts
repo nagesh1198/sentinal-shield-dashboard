@@ -263,7 +263,8 @@ export type Permission =
   | "server.manage"
   | "server.read"
   | "security.read"
-  | "security.respond";
+  | "security.respond"
+  | "ai.analyze";
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   platform_owner: ["*"],
@@ -274,6 +275,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "server.read",
     "security.read",
     "security.respond",
+    "ai.analyze",
   ],
   "security-analyst": [
     "security.read",
