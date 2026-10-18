@@ -8,6 +8,7 @@ import type { Permission } from "@/lib/types";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, BellRing, Radar, FileText,
+  Server, Settings, Shield, HelpCircle, LogOut,
   SlidersHorizontal, Bot, KeyRound, Orbit, Sparkles,
 } from "lucide-react";
 

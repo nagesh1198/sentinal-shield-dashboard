@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 // INV-RBAC-P5-1: Full Role-Based Permission Matrix Verification
 test("INV-RBAC-P5-1: ASVS Level 2 Verification - Persona Permission Boundary Constraints", () => {
-  const typesContent = fs.readFileSync("src/lib/types.ts", "utf8");
+  const typesContent = fs.readFileSync("src/lib/types.ts", "utf8").replace(/\r\n/g, "\n");
 
   // Verify that read-only has strictly zero write or mitigation permissions
   assert.ok(
