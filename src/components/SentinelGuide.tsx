@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   Sparkles,
   RotateCcw,
-  Bot,
   Play,
   Compass,
 } from "lucide-react";
@@ -46,7 +45,7 @@ const TOUR_STEPS: TourStep[] = [
     title: "Mission Control Overview",
     badge: "SOC Command Center",
     description:
-      "Welcome Operator! I'm Aegis, your AI cybersecurity guardian powered by Bible Strong procedural avatar geometry. I'll guide you step-by-step through our entire security platform so you know exactly what you can do here.",
+      "Welcome Operator! I'm Aegis Helper. I'll guide you through the dashboard and show you where to find each security tool.",
     icon: "🛡️",
     animation: "guide",
     expression: "happy",
@@ -480,7 +479,7 @@ export function SentinelGuide() {
           IDLE STATE: Procedural living avatar in dock with interactive bubble
       ═══════════════════════════════════════════════════════════════════ */}
       {!isActive && (
-        <aside aria-label="Aegis AI Assistant" className="fixed bottom-6 right-6 z-[100] flex flex-col items-end gap-3 pointer-events-auto">
+        <aside aria-label="Aegis Helper" className="fixed bottom-6 right-6 z-[100] flex flex-col items-end gap-3 pointer-events-auto">
           {/* Quick Tip / Prompt */}
           {showTooltip && (
             <div
@@ -489,10 +488,10 @@ export function SentinelGuide() {
             >
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400">
-                  <Bot className="w-3.5 h-3.5" />
+                  <Compass className="w-3.5 h-3.5" />
                 </span>
                 <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">
-                  Aegis AI Guardian
+                  Aegis Helper
                 </span>
               </div>
               <p className="text-xs text-slate-200 font-medium leading-relaxed">
@@ -526,7 +525,7 @@ export function SentinelGuide() {
             }}
             onMouseLeave={() => setIdleExpression("neutral")}
             className="relative rounded-full transition-transform duration-300 hover:scale-110 active:scale-95 drop-shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
-            title="Aegis AI Companion — Click to start interactive guide"
+            title="Aegis Helper — Click to start guided tour"
           >
             <SentinelAvatar
               size={54}
