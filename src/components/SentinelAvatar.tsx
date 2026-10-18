@@ -35,7 +35,7 @@ const PALETTES: Record<
   SentinelExpression,
   { line: string; accent: string; hand: string; handLight: string }
 > = {
-  neutral: { line: "#e0f2fe", accent: "#38bdf8", hand: "#0369a1", handLight: "#0ea5e9" },
+  neutral: { line: "#e0f2fe", accent: "#9ba9ff", hand: "#001b85", handLight: "#002bbd" },
   explaining: { line: "#f0f9ff", accent: "#38bdf8", hand: "#0369a1", handLight: "#0ea5e9" },
   happy: { line: "#ffffff", accent: "#67e8f9", hand: "#0e7490", handLight: "#22d3ee" },
   thinking: { line: "#f3e8ff", accent: "#c084fc", hand: "#5b21b6", handLight: "#8b5cf6" },
@@ -72,7 +72,7 @@ export function SentinelAvatar({
   handGesture = "auto",
   className = "",
   onClick,
-  ariaLabel = "CADOC Sentinel AI Avatar",
+  ariaLabel = "Aegis Helper avatar",
 }: SentinelAvatarProps) {
   const [mounted, setMounted] = useState(false);
   // useId output can contain characters that break url(#id) references
@@ -100,10 +100,10 @@ export function SentinelAvatar({
   if (!mounted) {
     return (
       <div
-        className={`relative inline-flex items-center justify-center rounded-full bg-slate-900 ${className}`}
+        className={`relative inline-flex items-center justify-center rounded-full bg-primary ${className}`}
         style={{ width: numSize, height: numSize }}
       >
-        <div className="w-1/2 h-1/2 rounded-full bg-cyan-500/20 animate-pulse" />
+        <div className="w-1/2 h-1/2 rounded-full bg-on-primary/20 animate-pulse" />
       </div>
     );
   }

@@ -104,9 +104,6 @@ export function ForensicsVault() {
         )}
       </div>
 
-      <button className="w-full mt-3 py-1.5 border border-primary/20 text-primary text-[10px] font-bold rounded-lg hover:bg-primary/5 transition-colors">
-        View Full Archive
-      </button>
     </div>
   );
 }

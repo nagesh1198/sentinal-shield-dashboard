@@ -93,21 +93,7 @@ const TOUR_STEPS: TourStep[] = [
     scrollIntoView: false,
   },
 
-  // 5. Navigation: Threat Detections
-  {
-    target: "[data-tour='nav-detections']",
-    title: "Heuristic Threat Detections",
-    badge: "MITRE ATT&CK Matrix",
-    description:
-      "Review correlated threat indicators, brute force clusters, privilege escalation flags, and zero-day signatures detected across all connected nodes.",
-    icon: "🔥",
-    animation: "warning",
-    expression: "alert",
-    placement: "sidebar-item",
-    scrollIntoView: false,
-  },
-
-  // 6. Navigation: Fleet Infrastructure
+  // 5. Navigation: Fleet Infrastructure
   {
     target: "[data-tour='nav-infrastructure']",
     title: "Managed Infrastructure",

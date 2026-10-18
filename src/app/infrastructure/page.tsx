@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { AddDatabaseModal } from "@/components/AddDatabaseModal";
 import { AddServerModal } from "@/components/AddServerModal";
 import { LiveHeartbeatLog } from "@/components/LiveHeartbeatLog";
 import { nodeService } from "@/services/nodeService";
@@ -12,7 +11,7 @@ import { decoyService } from "@/services/decoyService";
 import type { NodeInventory, ServerResponse, DecoyResponse, AgentRegistryResponse, AgentResponse } from "@/lib/types";
 import {
   Server, Cpu, MemoryStick, Activity, MoreVertical,
-  RotateCcw, ShieldOff, Database, Plus, Eye, Key,
+  RotateCcw, ShieldOff, Plus,
   RefreshCw, Loader2, AlertTriangle, ShieldCheck, Lock,
   Shield, ShieldAlert, Sparkles, FileCode, ChevronDown,
   ChevronUp, Copy, Check, Filter, Layers, Search, LayoutGrid,
@@ -21,24 +20,7 @@ import {
 import { usePermissions } from "@/lib/rbac";
 import { DynamicResourceWave } from "@/components/DynamicResourceWave";
 
-export type InfraTab = "servers" | "decoys" | "databases" | "events";
-
-const deceptionDbs = [
-  {
-    id: "DB-22910384", name: "PostgreSQL Main", type: "PostgreSQL",
-    status: "5 Canaries Active", statusColor: "text-primary bg-primary/5",
-    host: "db.prod.internal",
-    detail: { label: "Monitored Schemas", value: "_system_config, user_secrets" },
-    icon: Database, iconColor: "text-primary",
-  },
-  {
-    id: "DB-88120399", name: "Redis Cache Cluster", type: "Redis",
-    status: "Connected", statusColor: "text-emerald-700 bg-emerald-50",
-    host: "redis-01.cache.svc",
-    detail: { label: "Detection Mode", value: "Key Access Observability" },
-    icon: Key, iconColor: "text-amber-600",
-  },
-];
+export type InfraTab = "servers" | "decoys" | "events";
 
 const statusColor: Record<string, string> = {
   online: "bg-emerald-500",
@@ -141,7 +123,7 @@ export default function InfrastructurePage() {
   const { can, role } = usePermissions();
   const canManageServer = can("server.manage");
 
-  // Tab State: "servers" | "decoys" | "databases" | "events"
+  // Tab State: "servers" | "decoys" | "events"
   const [activeTab, setActiveTab] = useState<InfraTab>("servers");
 
   const [nodes, setNodes] = useState<NodeInventory[]>([]);
@@ -150,7 +132,6 @@ export default function InfrastructurePage() {
   const [decoys, setDecoys] = useState<DecoyResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAddDb, setShowAddDb] = useState(false);
   const [showAddServer, setShowAddServer] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [verifiedDecoyIds, setVerifiedDecoyIds] = useState<Record<string, boolean>>({});
@@ -171,8 +152,12 @@ export default function InfrastructurePage() {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
-      if (tabParam === "decoys" || tabParam === "servers" || tabParam === "databases" || tabParam === "events") {
+      if (tabParam === "decoys" || tabParam === "servers" || tabParam === "events") {
         setActiveTab(tabParam as InfraTab);
+      } else if (tabParam === "databases") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", "servers");
+        window.history.replaceState({}, "", url.toString());
       }
     }
   }, []);
@@ -647,23 +632,7 @@ export default function InfrastructurePage() {
             </span>
           </button>
 
-          {/* Tab 3: Deception Databases */}
-          <button
-            onClick={() => switchTab("databases")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
-              activeTab === "databases"
-                ? "border-primary text-primary bg-primary/5 rounded-t-lg"
-                : "border-transparent text-on-surface-variant hover:text-primary hover:bg-surface-container-low/50 rounded-t-lg"
-            }`}
-          >
-            <Database className="w-4 h-4" />
-            <span>Deception Databases</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] bg-surface-container-low text-on-surface-variant">
-              {deceptionDbs.length}
-            </span>
-          </button>
-
-          {/* Tab 4: Live Event Feed */}
+          {/* Tab 3: Live Event Feed */}
           <button
             onClick={() => switchTab("events")}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px ${
@@ -1506,79 +1475,7 @@ export default function InfrastructurePage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* TAB 3: DECEPTION DATABASES                                             */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === "databases" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-base font-bold text-primary">Deception Databases</h2>
-              <p className="text-xs text-on-surface-variant mt-0.5">
-                Configure canary schemas, monitored tables, and honey credentials.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAddDb(true)}
-              className="flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-primary-container transition-colors shadow-lg shadow-primary/20"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Database
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {deceptionDbs.map((db) => (
-              <div
-                key={db.id}
-                className="bg-white rounded-2xl p-5 border border-outline-variant/10 shadow-sm hover:shadow-md transition-all group"
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-primary/5 rounded-xl flex items-center justify-center shrink-0">
-                      <db.icon className={`w-4 h-4 ${db.iconColor}`} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-on-surface">{db.name}</p>
-                      <p className="text-[9px] font-mono text-on-surface-variant">{db.id}</p>
-                    </div>
-                  </div>
-                  <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${db.statusColor}`}>
-                    {db.status}
-                  </span>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between items-center py-1.5 border-b border-outline-variant/5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-                      Host
-                    </span>
-                    <span className="font-mono text-on-surface">{db.host}</span>
-                  </div>
-                  <div className="flex justify-between items-start py-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0">
-                      {db.detail.label}
-                    </span>
-                    <span className="font-mono text-on-surface text-right ml-4 text-[10px]">
-                      {db.detail.value}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-outline-variant/10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-primary/5 text-primary hover:bg-primary/10 transition-colors font-bold">
-                    <Eye className="w-3 h-3" /> View Canaries
-                  </button>
-                  <button className="flex items-center gap-1 text-[10px] px-3 py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors font-bold">
-                    Configure
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* TAB 4: LIVE EVENT FEED                                                 */}
+      {/* TAB 3: LIVE EVENT FEED                                                 */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {activeTab === "events" && (
         <div className="space-y-4 animate-in fade-in duration-200">
@@ -1594,7 +1491,6 @@ export default function InfrastructurePage() {
         </div>
       )}
 
-      <AddDatabaseModal isOpen={showAddDb} onClose={() => setShowAddDb(false)} />
       <AddServerModal isOpen={showAddServer} onClose={() => setShowAddServer(false)} onSuccess={loadData} />
     </DashboardLayout>
   );

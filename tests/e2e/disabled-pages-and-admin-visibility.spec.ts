@@ -37,3 +37,14 @@ test("platform owner sees client organizations; removed pages return 404", async
     expect(response.status()).toBe(404);
   }
 });
+
+test("dashboard keeps Forensics Vault without archive action and Detections page is unavailable", async ({ page }) => {
+  await signIn(page, "tenant_owner");
+  await page.goto(base);
+  await expect(page.getByText("Forensics Vault", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Detection Risk Scoring" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "View Full Archive" })).toHaveCount(0);
+  await expect(page.locator('a[href="/detections"]')).toHaveCount(0);
+  const response = await page.request.get(`${base}/detections`);
+  expect(response.status()).toBe(404);
+});

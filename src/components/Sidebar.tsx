@@ -7,7 +7,7 @@ import { usePermissions } from "@/lib/rbac";
 import type { Permission } from "@/lib/types";
 import { useState, useEffect } from "react";
 import {
-  LayoutDashboard, BellRing, Radar, FileText,
+  LayoutDashboard, BellRing, FileText,
   Server, Shield, HelpCircle, LogOut,
   SlidersHorizontal, Bot, KeyRound, Orbit, Sparkles,
 } from "lucide-react";
@@ -15,7 +15,6 @@ import {
 const navMain: { href: string; icon: typeof FileText; label: string; permission?: Permission }[] = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/events", icon: BellRing, label: "Events" },
-  { href: "/detections", icon: Radar, label: "Detections" },
   { href: "/ai-analysis", icon: Sparkles, label: "AI Analysis", permission: "ai.analyze" },
   { href: "/infrastructure", icon: Server, label: "Infrastructure" },
   { href: "/holistic", icon: Orbit, label: "Holistic View" },
