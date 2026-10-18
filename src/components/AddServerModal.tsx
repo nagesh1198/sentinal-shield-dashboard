@@ -6,6 +6,7 @@ import {
   Copy,
   Server,
   AlertTriangle,
+  AlertCircle,
   Check,
   RefreshCw,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   Loader2,
   CheckCircle2,
   Building,
+  MapPin,
 } from "lucide-react";
 import { nodeService } from "@/services/nodeService";
 import { projectService } from "@/services/projectService";
@@ -22,6 +24,15 @@ import { serverService } from "@/services/serverService";
 import { adminService } from "@/services/adminService";
 import { usePermissions } from "@/lib/rbac";
 import type { ProjectResponse } from "@/lib/types";
+import { COUNTRIES, getCountryByCode, formatLocation } from "@/lib/countries";
+import { SearchableCountrySelect } from "@/components/SearchableCountrySelect";
+import {
+  validateHostname,
+  validateIpAddress,
+  validateCountry,
+  validateServerForm,
+  type ServerFormErrors,
+} from "@/lib/serverValidation";
 
 interface AddServerModalProps {
   isOpen: boolean;
@@ -57,10 +68,14 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
 
   const [form, setForm] = useState({
     name: "",
+    country: "",
+    cityOrRegion: "",
     location: "",
     ip: "",
     profile: "honey-web",
   });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
   const { isPlatformAdmin, user } = usePermissions();
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
@@ -79,7 +94,15 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
       setToken("");
       setInstallCmd("");
       setError(null);
-      setForm({ name: "", location: "", ip: "", profile: "honey-web" });
+      setTouched({});
+      setForm({
+        name: "",
+        country: "",
+        cityOrRegion: "",
+        location: "",
+        ip: "",
+        profile: "honey-web",
+      });
       if (initialTenant) {
         setSelectedTenant(initialTenant);
       }
@@ -111,7 +134,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
           // Continue gracefully
         });
     }
-  }, [isOpen, isPlatformAdmin]);
+  }, [isOpen, isPlatformAdmin, initialTenant]);
 
   // Countdown timer for Step 2
   useEffect(() => {
@@ -127,7 +150,32 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
   const isExpiring = timeLeft < 60;
 
   const refreshCmd = `cadoc-cli refresh --all-nodes --force`;
-  const canAdvanceStep1 = form.name.trim() && form.location.trim() && form.ip.trim();
+
+  // Real-time form validation evaluation
+  const validationErrors: ServerFormErrors = validateServerForm(
+    {
+      name: form.name,
+      country: form.country,
+      cityOrRegion: form.cityOrRegion,
+      ip: form.ip,
+      profile: form.profile,
+      projectId: selectedProjectId,
+      newProjectName: newProjectName,
+    },
+    projects.length > 0
+  );
+
+  const isFormValid = !validationErrors.hasErrors;
+  const canAdvanceStep1 = isFormValid && !generating;
+
+  const selectedCountryObj = getCountryByCode(form.country);
+  const formattedLocation = form.country
+    ? formatLocation(form.country, form.cityOrRegion)
+    : form.location;
+
+  const markTouched = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  };
 
   function copy(text: string, setter: (v: boolean) => void) {
     navigator.clipboard.writeText(text);
@@ -136,6 +184,19 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
   }
 
   const handleGenerateToken = async () => {
+    // Mark all input fields as touched so validation errors are displayed immediately
+    setTouched({
+      name: true,
+      country: true,
+      ip: true,
+      project: true,
+    });
+
+    if (!isFormValid) {
+      setError("Please resolve the highlighted validation errors before generating a token.");
+      return;
+    }
+
     setGenerating(true);
     setError(null);
     try {
@@ -160,7 +221,12 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
             hostname: form.name.trim(),
             ip_address: form.ip.trim(),
             status: "provisioning",
-            specs: { location: form.location.trim(), profile: form.profile },
+            specs: {
+              location: formattedLocation,
+              country: form.country,
+              city: form.cityOrRegion.trim() || undefined,
+              profile: form.profile,
+            },
             company_slug: isPlatformAdmin ? selectedTenant : (user?.companySlug || undefined),
           });
           if (s?.id) createdServerId = s.id;
@@ -211,9 +277,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-    >
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-[fadeUp_0.2s_ease] border border-outline-variant/10">
         {/* Header */}
         <div className="flex items-start justify-between px-6 pt-6 pb-4">
@@ -224,7 +288,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
             <div>
               <h2 className="text-base font-bold text-on-surface">Add New Server</h2>
               <p className="text-xs text-on-surface-variant">
-                Step {step}: {step === 1 ? "Configure Server" : step === 2 ? "Deploy Tactical Sentinel" : "Verify Deployment"}
+                Step {step}: {step === 1 ? "Configure Server & Placement" : step === 2 ? "Deploy Tactical Sentinel" : "Verify Deployment"}
               </p>
             </div>
           </div>
@@ -244,22 +308,20 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                 {/* Step circle + label */}
                 <div className="flex items-center gap-2">
                   <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${step > s.num
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                      step > s.num
                         ? "bg-emerald-500 text-white"
                         : step === s.num
                           ? "bg-primary text-white shadow-lg shadow-primary/30"
                           : "bg-surface-container-high text-on-surface-variant"
-                      }`}
+                    }`}
                   >
-                    {step > s.num ? (
-                      <Check className="w-4 h-4" />
-                    ) : (
-                      s.num
-                    )}
+                    {step > s.num ? <Check className="w-4 h-4" /> : s.num}
                   </div>
                   <span
-                    className={`text-[11px] font-semibold transition-colors ${step >= s.num ? "text-on-surface" : "text-on-surface-variant/50"
-                      }`}
+                    className={`text-[11px] font-semibold transition-colors ${
+                      step >= s.num ? "text-on-surface" : "text-on-surface-variant/50"
+                    }`}
                   >
                     {s.label}
                   </span>
@@ -288,7 +350,6 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
 
         {/* Step Content */}
         <div className="px-6 pb-6 space-y-4 max-h-[72vh] overflow-y-auto">
-
           {/* STEP 1: Configure */}
           {step === 1 && (
             <>
@@ -318,15 +379,31 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                 </div>
               )}
 
+              {/* Project Selection with Validation */}
               <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
-                  Target Project
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                    Target Project *
+                  </label>
+                  {touched.project && !validationErrors.project && (
+                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Valid
+                    </span>
+                  )}
+                </div>
                 {projects.length > 0 ? (
                   <select
                     value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface outline-none focus:border-primary/40 transition-colors"
+                    onChange={(e) => {
+                      setSelectedProjectId(e.target.value);
+                      markTouched("project");
+                    }}
+                    onBlur={() => markTouched("project")}
+                    className={`w-full bg-surface-container-low border rounded-xl px-4 py-2.5 text-sm text-on-surface outline-none transition-colors ${
+                      touched.project && validationErrors.project
+                        ? "border-red-400 bg-red-50/20 focus:border-red-500"
+                        : "border-outline-variant/20 focus:border-primary/40"
+                    }`}
                   >
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -337,52 +414,179 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                 ) : (
                   <input
                     value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onChange={(e) => {
+                      setNewProjectName(e.target.value);
+                      markTouched("project");
+                    }}
+                    onBlur={() => markTouched("project")}
                     placeholder="e.g. Production Cluster (Project name)"
-                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                    className={`w-full bg-surface-container-low border rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none transition-colors ${
+                      touched.project && validationErrors.project
+                        ? "border-red-400 bg-red-50/20 focus:border-red-500"
+                        : "border-outline-variant/20 focus:border-primary/40"
+                    }`}
                   />
+                )}
+                {touched.project && validationErrors.project && (
+                  <p className="flex items-center gap-1 text-[11px] text-red-600 font-medium mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {validationErrors.project}
+                  </p>
                 )}
               </div>
 
+              {/* Hostname with Strict RFC 1123 Validation */}
               <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
-                  Server ID (Hostname)
-                </label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. SENTINEL-NODE-05"
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
-                  Location
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                    Server ID / Hostname *
+                  </label>
+                  {touched.name && !validationErrors.name && form.name && (
+                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Valid Hostname
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
-                  <Globe className="absolute left-3.5 top-3 w-4 h-4 text-on-surface-variant/40 pointer-events-none" />
                   <input
-                    value={form.location}
-                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                    placeholder="e.g. Tokyo, JP"
-                    className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl pl-10 pr-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                    value={form.name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm((f) => ({ ...f, name: val }));
+                      markTouched("name");
+                    }}
+                    onBlur={() => markTouched("name")}
+                    placeholder="e.g. SENTINEL-NODE-05 or cluster-prod-01"
+                    className={`w-full bg-surface-container-low border rounded-xl px-4 py-2.5 text-sm font-mono text-on-surface placeholder:text-on-surface-variant/40 outline-none transition-colors ${
+                      touched.name && validationErrors.name
+                        ? "border-red-400 bg-red-50/20 focus:border-red-500"
+                        : "border-outline-variant/20 focus:border-primary/40"
+                    }`}
                   />
                 </div>
+                {touched.name && validationErrors.name ? (
+                  <p className="flex items-center gap-1 text-[11px] text-red-600 font-medium mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {validationErrors.name}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                    RFC 1123 format: letters, numbers, hyphens, and dots (2–63 characters).
+                  </p>
+                )}
               </div>
 
+              {/* Country Selection & Placement */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1">
+                    <Globe className="w-3 h-3 text-primary" />
+                    Country Placement *
+                  </label>
+                  {touched.country && !validationErrors.country && form.country && (
+                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> {selectedCountryObj?.name}
+                    </span>
+                  )}
+                </div>
+
+                <SearchableCountrySelect
+                  value={form.country}
+                  onChange={(code) => {
+                    setForm((f) => ({
+                      ...f,
+                      country: code,
+                      location: formatLocation(code, f.cityOrRegion),
+                    }));
+                    markTouched("country");
+                  }}
+                  onBlur={() => markTouched("country")}
+                  hasError={!!(touched.country && validationErrors.country)}
+                  errorMessage={validationErrors.country}
+                />
+
+                {touched.country && validationErrors.country && (
+                  <p className="flex items-center gap-1 text-[11px] text-red-600 font-medium mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {validationErrors.country}
+                  </p>
+                )}
+
+                {/* Optional City / Datacenter region */}
+                <div className="pt-1">
+                  <div className="relative">
+                    <MapPin className="absolute left-3.5 top-3 w-4 h-4 text-on-surface-variant/40 pointer-events-none" />
+                    <input
+                      value={form.cityOrRegion}
+                      onChange={(e) => {
+                        const city = e.target.value;
+                        setForm((f) => ({
+                          ...f,
+                          cityOrRegion: city,
+                          location: formatLocation(f.country, city),
+                        }));
+                      }}
+                      placeholder="City or Datacenter zone (e.g. Tokyo, Frankfurt, us-east-1)"
+                      className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl pl-10 pr-4 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Location preview badge */}
+                {form.country && (
+                  <div className="bg-primary/5 border border-primary/15 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs text-primary">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="text-base">{selectedCountryObj?.flag}</span>
+                      <span>Cluster Location:</span>
+                      <strong className="font-bold text-on-surface">{formattedLocation}</strong>
+                    </span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-primary/10">
+                      {selectedCountryObj?.region}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* IP Address with IPv4/IPv6 Validation */}
               <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
-                  IP Address
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                    IP Address *
+                  </label>
+                  {touched.ip && !validationErrors.ip && form.ip && (
+                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Valid IP
+                    </span>
+                  )}
+                </div>
                 <input
                   value={form.ip}
-                  onChange={(e) => setForm((f) => ({ ...f, ip: e.target.value }))}
-                  placeholder="e.g. 10.20.1.45"
-                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm font-mono text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 transition-colors"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setForm((f) => ({ ...f, ip: val }));
+                    markTouched("ip");
+                  }}
+                  onBlur={() => markTouched("ip")}
+                  placeholder="e.g. 10.20.1.45 or 192.168.1.100"
+                  className={`w-full bg-surface-container-low border rounded-xl px-4 py-2.5 text-sm font-mono text-on-surface placeholder:text-on-surface-variant/40 outline-none transition-colors ${
+                    touched.ip && validationErrors.ip
+                      ? "border-red-400 bg-red-50/20 focus:border-red-500"
+                      : "border-outline-variant/20 focus:border-primary/40"
+                  }`}
                 />
+                {touched.ip && validationErrors.ip ? (
+                  <p className="flex items-center gap-1 text-[11px] text-red-600 font-medium mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {validationErrors.ip}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                    Valid IPv4 (0.0.0.0 – 255.255.255.255) or standard IPv6.
+                  </p>
+                )}
               </div>
 
+              {/* Deployment Profile */}
               <div>
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1.5">
                   Deployment Profile
@@ -391,11 +595,13 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                   {PROFILES.map((p) => (
                     <button
                       key={p.id}
+                      type="button"
                       onClick={() => setForm((f) => ({ ...f, profile: p.id }))}
-                      className={`text-left p-3 rounded-xl border transition-all ${form.profile === p.id
-                          ? "border-primary bg-primary/5 shadow-sm"
+                      className={`text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                        form.profile === p.id
+                          ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20"
                           : "border-outline-variant/20 hover:bg-surface-container-low"
-                        }`}
+                      }`}
                     >
                       <div className="flex items-center gap-2 mb-0.5">
                         <Shield className={`w-3.5 h-3.5 ${form.profile === p.id ? "text-primary" : "text-on-surface-variant"}`} />
@@ -428,6 +634,17 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                     {mins}:{secs}
                   </p>
                 </div>
+              </div>
+
+              {/* Server Destination Confirmation */}
+              <div className="bg-surface-container-low/60 rounded-xl px-4 py-2.5 border border-outline-variant/10 flex items-center justify-between text-xs">
+                <span className="text-on-surface-variant flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-primary" /> Target Node Location:
+                </span>
+                <span className="font-bold text-on-surface flex items-center gap-1.5">
+                  <span>{selectedCountryObj?.flag}</span>
+                  <span>{formattedLocation}</span>
+                </span>
               </div>
 
               {/* Warning */}
@@ -513,8 +730,11 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                           <span className="font-bold text-on-surface font-mono">{form.name || "—"}</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-on-surface-variant">Location</span>
-                          <span className="font-medium text-on-surface">{form.location || "—"}</span>
+                          <span className="text-on-surface-variant">Country & Location</span>
+                          <span className="font-medium text-on-surface flex items-center gap-1.5">
+                            {selectedCountryObj?.flag && <span>{selectedCountryObj.flag}</span>}
+                            <span>{formattedLocation || "—"}</span>
+                          </span>
                         </div>
                         <div className="flex justify-between text-xs">
                           <span className="text-on-surface-variant">IP Address</span>
@@ -557,8 +777,11 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
                       <span className="font-bold text-emerald-800 font-mono">{form.name}</span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-emerald-700">Location</span>
-                      <span className="font-medium text-emerald-800">{form.location}</span>
+                      <span className="text-emerald-700">Country & Location</span>
+                      <span className="font-medium text-emerald-800 flex items-center gap-1.5">
+                        {selectedCountryObj?.flag && <span>{selectedCountryObj.flag}</span>}
+                        <span>{formattedLocation}</span>
+                      </span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-emerald-700">Status</span>
@@ -600,7 +823,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
               {step === 1 && (
                 <button
                   onClick={handleGenerateToken}
-                  disabled={!canAdvanceStep1 || generating}
+                  disabled={!canAdvanceStep1}
                   className="flex items-center gap-1.5 px-6 py-2.5 rounded-full text-sm font-bold bg-primary text-white hover:bg-primary-container transition-colors shadow-lg shadow-primary/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {generating ? (
