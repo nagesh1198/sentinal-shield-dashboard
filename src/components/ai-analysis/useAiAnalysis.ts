@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AiRequestError, streamAnalysis } from "@/services/aiAnalysisService";
+import {
+  forensicsService,
+  extractChatResponseText,
+  extractSqlQueryFromChat,
+  buildForensicsHistoryContext,
+  sanitizeForensicsResult,
+} from "@/services/forensicsService";
 import type { DataUsed, SseEvent } from "@/lib/ai/types";
+import type { ForensicsQueryResult, ForensicsChatMessage } from "@/lib/types";
 
 export interface ToolActivity {
   name: string;
@@ -17,6 +25,8 @@ export interface ChatMessage {
   status: "streaming" | "done" | "error" | "stopped";
   phase?: "collecting" | "analysing";
   question?: string;
+  sql?: string;
+  queryResult?: ForensicsQueryResult;
   dataUsed?: DataUsed;
   truncation?: string[];
   tools: ToolActivity[];
@@ -72,17 +82,20 @@ export function useAiAnalysis() {
   const send = useCallback(
     async (question: string, queryBody: object | null): Promise<void> => {
       if (busy) return;
-      const isFollowup = sessionRef.current !== null;
+      const isFollowup = sessionRef.current !== null && locked;
       const body = isFollowup ? { session_id: sessionRef.current, message: question } : queryBody;
       if (!body) return;
 
       const asstId = uid();
       setNotice(null);
-      setMessages((prev) => [
-        ...prev,
-        { id: uid(), role: "user", content: question, status: "done", tools: [], createdAt: Date.now() },
-        { id: asstId, role: "assistant", content: "", status: "streaming", phase: "collecting", question, tools: [], createdAt: Date.now() },
-      ]);
+      const newUserMsg: AnalysisMessage = { id: uid(), role: "user", content: question, status: "done", tools: [], createdAt: Date.now() };
+      const newAsstMsg: AnalysisMessage = { id: asstId, role: "assistant", content: "", status: "streaming", phase: "collecting", question, tools: [], createdAt: Date.now() };
+
+      if (!isFollowup) {
+        setMessages([newUserMsg, newAsstMsg]);
+      } else {
+        setMessages((prev) => [...prev, newUserMsg, newAsstMsg]);
+      }
       setBusy(true);
       const ac = new AbortController();
       abortRef.current = ac;
@@ -155,11 +168,212 @@ export function useAiAnalysis() {
     [busy, flush, patch]
   );
 
+  const activeProjectIdRef = useRef<string | null>(null);
+  const activeSqlRef = useRef<string | null>(null);
+  const activeResultRef = useRef<ForensicsQueryResult | null>(null);
+
+  const sendProjectForensics = useCallback(
+    async (params: {
+      projectId: string;
+      sql?: string;
+      userPrompt: string;
+      filterRange?: string;
+      isFollowup?: boolean;
+    }): Promise<void> => {
+      if (busy) return;
+      const { projectId, sql, userPrompt, filterRange } = params;
+      const isFollowup = params.isFollowup ?? locked;
+      const asstId = uid();
+      setNotice(null);
+
+      // On a new analysis (or project change), clear all previous records & cached query results
+      if (!isFollowup || activeProjectIdRef.current !== projectId) {
+        activeProjectIdRef.current = projectId;
+        activeResultRef.current = null;
+        activeSqlRef.current = null;
+      }
+      if (sql) {
+        activeSqlRef.current = sql;
+      }
+
+      const priorResult = isFollowup ? activeResultRef.current : null;
+      const priorSql = isFollowup ? activeSqlRef.current : (sql || null);
+
+      const newUserMsg: AnalysisMessage = {
+        id: uid(),
+        role: "user",
+        content: userPrompt,
+        status: "done",
+        tools: [],
+        createdAt: Date.now(),
+      };
+
+      const newAsstMsg: AnalysisMessage = {
+        id: asstId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        phase: "collecting",
+        question: userPrompt,
+        sql: priorSql || undefined,
+        tools: [
+          {
+            name: "forensics_chat",
+            status: "running",
+            summary: priorResult
+              ? `Sending inquiry with stored query evidence (${priorResult.rows.length} records) to Forensics AI Chat…`
+              : "Calling Forensics AI Chat to generate query (Swagger Step 1)…",
+          },
+        ],
+        createdAt: Date.now(),
+      };
+
+      // If new analysis, replace all previous messages; if follow-up, append to history
+      if (!isFollowup) {
+        setMessages([newUserMsg, newAsstMsg]);
+      } else {
+        setMessages((prev) => [...prev, newUserMsg, newAsstMsg]);
+      }
+
+      setBusy(true);
+      setLocked(true);
+
+      // Extract existing forensics conversation history (up to 19 completed messages)
+      const prevForensicsHistory: ForensicsChatMessage[] = [];
+      if (isFollowup) {
+        for (const m of messages) {
+          if (m.status !== "done") continue;
+          if (m.role === "user") {
+            prevForensicsHistory.push({
+              role: "user",
+              content: m.content.slice(0, 4000),
+            });
+          } else if (m.role === "assistant") {
+            prevForensicsHistory.push({
+              role: "assistant",
+              content: (m.content || "").slice(0, 4000),
+              ...(m.sql ? { sql: m.sql.slice(0, 8000) } : {}),
+              ...(m.queryResult ? { result: sanitizeForensicsResult(m.queryResult) } : {}),
+            });
+          }
+        }
+      }
+
+      try {
+        const contextualPrompt = filterRange
+          ? `${userPrompt}\n[Time Filter Range: ${filterRange}]`
+          : userPrompt;
+
+        // Build user message containing the last queried result (e.g. 24h summary) & SQL if available
+        const userMsgToSend: ForensicsChatMessage = {
+          role: "user",
+          content: contextualPrompt,
+          ...(priorSql ? { sql: priorSql } : {}),
+          ...(priorResult ? { result: sanitizeForensicsResult(priorResult) } : {}),
+        };
+
+        const messagesToSend = buildForensicsHistoryContext(
+          prevForensicsHistory,
+          userMsgToSend
+        );
+
+        // Step 1: Call Forensics AI Chat first (sending previous query evidence if present)
+        const chatRes = await forensicsService.chat(projectId, {
+          messages: messagesToSend,
+        });
+
+        const chatText = extractChatResponseText(chatRes);
+        let generatedSql: string | null = null;
+        try {
+          generatedSql = extractSqlQueryFromChat(chatRes, priorSql || undefined);
+        } catch {
+          generatedSql = null;
+        }
+
+        // Step 2: If chat generated a query, execute it via Query API and store the result for next turn
+        if (generatedSql) {
+          patch(asstId, (m) => ({
+            ...m,
+            content: chatText || "Forensics AI Chat formulated query.",
+            sql: generatedSql,
+            phase: "analysing",
+            tools: [
+              {
+                name: "forensics_chat",
+                status: "done" as const,
+                summary: "Forensics AI Chat formulated targeted query",
+              },
+              {
+                name: "forensics_query",
+                status: "running" as const,
+                summary: "Executing generated query via Forensics Query API to generate summary…",
+              },
+            ],
+          }));
+
+          const queryResult = await forensicsService.query(projectId, { sql: generatedSql });
+          // Store result & SQL in active refs so next user question receives them in chat payload
+          activeResultRef.current = queryResult;
+          activeSqlRef.current = generatedSql;
+
+          patch(asstId, (m) => ({
+            ...m,
+            content: chatText || "Forensics query executed successfully.",
+            sql: generatedSql,
+            queryResult,
+            status: "done",
+            phase: undefined,
+            tools: [
+              {
+                name: "forensics_chat",
+                status: "done" as const,
+                summary: "Forensics AI Chat formulated targeted query",
+              },
+              {
+                name: "forensics_query",
+                status: "done" as const,
+                summary: `Generated summary evidence (${queryResult.rows.length} records)`,
+              },
+            ],
+          }));
+        } else {
+          patch(asstId, (m) => ({
+            ...m,
+            content: chatText || "Forensics analysis completed.",
+            status: "done",
+            phase: undefined,
+            tools: [
+              {
+                name: "forensics_chat",
+                status: "done" as const,
+                summary: "Forensics AI Chat responded",
+              },
+            ],
+          }));
+        }
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : "Forensics pipeline failed";
+        patch(asstId, (m) => ({
+          ...m,
+          status: "error",
+          phase: undefined,
+          error: { code: "forensics_error", message: errorMsg },
+        }));
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+    },
+    [busy, patch]
+  );
+
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     sessionRef.current = null;
+    activeProjectIdRef.current = null;
+    activeSqlRef.current = null;
+    activeResultRef.current = null;
     pendingText.current = "";
     setMessages([]);
     setLocked(false);
@@ -170,5 +384,16 @@ export function useAiAnalysis() {
   /** Drops the last user+assistant pair so the same question can be re-sent cleanly. */
   const dropLastTurn = useCallback(() => setMessages((prev) => prev.slice(0, -2)), []);
 
-  return { messages, busy, locked, notice, send, stop, reset, dropLastTurn };
+  return {
+    messages,
+    busy,
+    locked,
+    notice,
+    send,
+    sendProjectForensics,
+    activeProjectId: activeProjectIdRef.current,
+    stop,
+    reset,
+    dropLastTurn,
+  };
 }

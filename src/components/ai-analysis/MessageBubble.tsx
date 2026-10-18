@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, FileDown, Loader2, Printer, RefreshCw, Sparkles, Square, Wrench } from "lucide-react";
 import { DataUsedBar } from "./DataUsedBar";
 import { SafeMarkdown } from "./SafeMarkdown";
+import { ForensicsQueryResultTable } from "./ForensicsQueryResultTable";
 import { buildMarkdownReport, buildPrintHtml, copyText, downloadText, printHtml, reportFilename } from "@/lib/aiExport";
 import type { ChatMessage } from "./useAiAnalysis";
 
@@ -86,6 +87,8 @@ export function MessageBubble({ message: m, isLast, onRetry }: Props) {
         )}
 
         {hasAnswer && <SafeMarkdown source={m.content} />}
+
+        {m.queryResult && <ForensicsQueryResultTable result={m.queryResult} sql={m.sql} />}
 
         {streaming && !hasAnswer && (
           <div className="space-y-2" aria-hidden>

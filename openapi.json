@@ -212,27 +212,49 @@
         "summary": "List Agents",
         "description": "Exposes high-speed, direct database query of registered tenant agents.",
         "operationId": "list_agents_api_v1_dashboard_agents_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "include_decommissioned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Decommissioned"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/app__api__v1__endpoints__dashboard__AgentResponse"
                   },
-                  "type": "array",
                   "title": "Response List Agents Api V1 Dashboard Agents Get"
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/dashboard/agents/metrics": {
@@ -551,8 +573,37 @@
           "dashboard"
         ],
         "summary": "Get Alerts Stream",
-        "description": "Provides multi-tenant real-time security alert feeds using Redis Pub/Sub SSE stream.",
+        "description": "Provides multi-tenant real-time feed (alerts + agent heartbeats) using Redis Pub/Sub SSE stream.\nTenant comes from the JWT (channel name); `server_id` only narrows within that tenant.",
         "operationId": "get_alerts_stream_api_v1_dashboard_alerts_stream_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events for this server (default: all servers)",
+              "title": "Server Id"
+            },
+            "description": "Only events for this server (default: all servers)"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -561,16 +612,18 @@
                 "schema": {}
               }
             }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
           },
-          {
-            "HTTPBearer": []
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        ]
+        }
       }
     },
     "/api/v1/keys/": {
@@ -710,7 +763,7 @@
           "decoys"
         ],
         "summary": "List Decoys",
-        "description": "Exposes read-only, schema-isolated listings of active canary decoy files.",
+        "description": "Exposes read-only, schema-isolated listings of canary decoy files, optionally for one server.",
         "operationId": "list_decoys_api_v1_decoys__get",
         "security": [
           {
@@ -736,6 +789,25 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "name": "server_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only decoys planted on this server",
+              "title": "Server Id"
+            },
+            "description": "Only decoys planted on this server"
           }
         ],
         "responses": {
@@ -823,7 +895,7 @@
           "agents"
         ],
         "summary": "Decommission Agent",
-        "description": "Decommissions a Sentinel agent:\n1. Updates Postgres status to 'offline' within the client schema.\n2. Writes agent ID blacklist entry in Redis.\n3. Adds audit entry into global log.",
+        "description": "Decommissions a Sentinel agent:\n1. Updates Postgres status to 'decommissioned' within the client schema.\n2. Writes agent ID blacklist entry in Redis.\n3. Adds audit entry into global log.",
         "operationId": "decommission_agent_api_v1_agents__agent_id__decommission_post",
         "security": [
           {
@@ -872,7 +944,7 @@
           "agents"
         ],
         "summary": "Recommission Agent",
-        "description": "Recommissions a decommissioned Sentinel agent:\n1. Updates Postgres status back to 'active' within the client schema.\n2. Deletes agent ID blacklist entry from Redis.\n3. Adds audit entry into global log.",
+        "description": "Recommissions a decommissioned Sentinel agent:\n1. Updates Postgres status to 'offline' (the next heartbeat makes it 'active').\n2. Deletes agent ID blacklist entry from Redis.\n3. Adds audit entry into global log.",
         "operationId": "recommission_agent_api_v1_agents__agent_id__recommission_post",
         "security": [
           {
@@ -1329,7 +1401,7 @@
           "admins"
         ],
         "summary": "Get Client Detail",
-        "description": "Returns a comprehensive client-specific dashboard ΓÇö servers, agents,\ndecoy inventory, and a feed of recent tamper alerts.\nUses explicit schema-qualified table names to avoid connection pool search_path issues.",
+        "description": "Returns a comprehensive client-specific dashboard — servers, agents,\ndecoy inventory, and a feed of recent tamper alerts.\nUses explicit schema-qualified table names to avoid connection pool search_path issues.",
         "operationId": "get_client_detail_api_v1_admins_clients__company_slug__get",
         "security": [
           {
@@ -1482,6 +1554,124 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/forensics/query": {
+      "post": {
+        "tags": [
+          "forensics"
+        ],
+        "summary": "Query",
+        "operationId": "query_api_v1_projects__project_id__forensics_query_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/forensics/chat": {
+      "post": {
+        "tags": [
+          "forensics"
+        ],
+        "summary": "Forensics Chat",
+        "operationId": "forensics_chat_api_v1_projects__project_id__forensics_chat_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/servers/": {
       "post": {
         "tags": [
@@ -1536,7 +1726,7 @@
           "servers"
         ],
         "summary": "List Servers",
-        "description": "Lists all servers in the tenant's schema.",
+        "description": "Lists servers in the tenant's schema. Servers whose agent was decommissioned are\nhidden unless include_decommissioned=true.",
         "operationId": "list_servers_api_v1_servers__get",
         "security": [
           {
@@ -1562,6 +1752,16 @@
               ],
               "title": "Company Slug"
             }
+          },
+          {
+            "name": "include_decommissioned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Decommissioned"
+            }
           }
         ],
         "responses": {
@@ -1575,6 +1775,75 @@
                     "$ref": "#/components/schemas/ServerResponse"
                   },
                   "title": "Response List Servers Api V1 Servers  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/tenants/{slug}/servers/{server_id}/canaries": {
+      "get": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "List Server Canaries",
+        "description": "Planted/tampered/orphaned canaries the sentinel on this server should remove.",
+        "operationId": "list_server_canaries_internal_v1_tenants__slug__servers__server_id__canaries_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          },
+          {
+            "name": "x-internal-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanaryList"
                 }
               }
             }
@@ -1811,6 +2080,17 @@
             "type": "string",
             "title": "Server Id"
           },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
           "event_type": {
             "type": "string",
             "title": "Event Type"
@@ -1839,6 +2119,73 @@
         ],
         "title": "AlertPayload"
       },
+      "CanaryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "type",
+          "sha256",
+          "status"
+        ],
+        "title": "CanaryItem"
+      },
+      "CanaryList": {
+        "properties": {
+          "canaries": {
+            "items": {
+              "$ref": "#/components/schemas/CanaryItem"
+            },
+            "type": "array",
+            "title": "Canaries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "canaries"
+        ],
+        "title": "CanaryList"
+      },
+      "ChatReq": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "ChatReq"
+      },
       "DecoyResponse": {
         "properties": {
           "id": {
@@ -1848,6 +2195,17 @@
           "server_id": {
             "type": "string",
             "title": "Server Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
           },
           "file_path": {
             "type": "string",
@@ -2018,6 +2376,51 @@
         ],
         "title": "LoginRequest"
       },
+      "Message": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Content"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Result"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "Message"
+      },
       "MitigatePayload": {
         "properties": {
           "notes": {
@@ -2040,6 +2443,17 @@
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
           },
           "location": {
             "type": "string",
@@ -2229,6 +2643,47 @@
         ],
         "title": "ProjectResponse"
       },
+      "QueryReq": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "QueryReq"
+      },
+      "Result": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Columns"
+          },
+          "rows": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "rows"
+        ],
+        "title": "Result"
+      },
       "RoleAssignRequest": {
         "properties": {
           "role_name": {
@@ -2403,6 +2858,19 @@
           "token_type": {
             "type": "string",
             "title": "Token Type"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "user"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
           }
         },
         "type": "object",
@@ -2486,6 +2954,17 @@
             "type": "string",
             "title": "Server Id"
           },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
           "version": {
             "type": "string",
             "title": "Version"
@@ -2544,6 +3023,17 @@
           "server_id": {
             "type": "string",
             "title": "Server Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
           },
           "version": {
             "anyOf": [

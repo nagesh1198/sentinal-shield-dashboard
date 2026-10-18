@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Topnav } from "@/components/Topnav";
 import { Sidebar } from "@/components/Sidebar";
+import { SentinelGuide } from "@/components/SentinelGuide";
 import { isAuthenticated } from "@/lib/auth";
 
 export function DashboardLayout({ children, offline = false }: { children: React.ReactNode; offline?: boolean }) {
@@ -45,6 +46,7 @@ export function DashboardLayout({ children, offline = false }: { children: React
       >
         {children}
       </main>
+      <SentinelGuide />
     </>
   );
 }

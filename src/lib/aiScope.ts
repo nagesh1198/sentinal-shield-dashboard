@@ -27,6 +27,7 @@ export const DECOY_TYPES = ["ssh_key", "env_file", "config_backup", "db_dump"] a
 export const DECOY_STATUSES = ["planted", "tampered", "cleaned_up", "verification_failed"] as const;
 
 export interface ScopeState {
+  projectId: string;
   serverIds: string[];
   preset: PresetId;
   customFrom: string; // <input type="datetime-local"> value, local time
@@ -34,10 +35,14 @@ export interface ScopeState {
   sources: Source[];
   decoyType: string; // "" = any
   status: string; // "" = any
+  severity?: string; // "" = any
+  customSql?: string;
+  mode?: "project_forensics" | "servers";
 }
 
 export function defaultScope(): ScopeState {
   return {
+    projectId: "",
     serverIds: [],
     preset: "24h",
     customFrom: "",
@@ -45,6 +50,9 @@ export function defaultScope(): ScopeState {
     sources: ["decoy_events", "tamper_history", "forensic_findings"],
     decoyType: "",
     status: "",
+    severity: "",
+    customSql: "",
+    mode: "servers",
   };
 }
 
@@ -61,9 +69,13 @@ export function resolveRange(scope: ScopeState, now: number): { from: string; to
 
 export function validateScope(scope: ScopeState, now: number): string[] {
   const errors: string[] = [];
-  if (scope.serverIds.length === 0) errors.push("Select at least one server.");
-  if (scope.serverIds.length > MAX_SERVERS) errors.push(`Select at most ${MAX_SERVERS} servers.`);
-  if (scope.sources.length === 0) errors.push("Select at least one data source.");
+  if (scope.mode === "project_forensics") {
+    if (!scope.projectId) errors.push("Select a project for forensics analysis.");
+  } else {
+    if (scope.serverIds.length === 0) errors.push("Select at least one server.");
+    if (scope.serverIds.length > MAX_SERVERS) errors.push(`Select at most ${MAX_SERVERS} servers.`);
+    if (scope.sources.length === 0) errors.push("Select at least one data source.");
+  }
   if (scope.preset === "custom") {
     const r = resolveRange(scope, now);
     if (!r) errors.push("Enter both a start and an end time.");

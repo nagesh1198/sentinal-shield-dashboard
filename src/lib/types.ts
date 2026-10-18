@@ -341,3 +341,34 @@ export const KNOWN_PERSONAS: Record<string, PersonaProfile> = {
     scopeDescription: "Full cross-tenant control plane: provision clients, global admins, audit logs",
   },
 };
+
+// ─── Project Forensics API (Swagger) ───
+export interface ForensicsQueryResult {
+  columns: string[];
+  rows: unknown[][];
+}
+
+export interface ForensicsQueryReq {
+  sql: string;
+}
+
+export interface ForensicsChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  sql?: string | null;
+  result?: ForensicsQueryResult | null;
+}
+
+export interface ForensicsChatReq {
+  messages: ForensicsChatMessage[];
+}
+
+export interface ForensicsChatResponse {
+  role?: string;
+  content?: string;
+  message?: string;
+  response?: string;
+  text?: string;
+  detail?: string;
+  [key: string]: unknown;
+}

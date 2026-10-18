@@ -1,4 +1,4 @@
-import type { NodeInventory, ServerResponse } from "@/lib/types";
+import type { NodeInventory, ServerResponse, AlertPayload } from "@/lib/types";
 import type { IncidentSignal, TelemetryEvent } from './incidentBrief';
 import type { SeededAlertType } from './incidentRules';
 import { MOCK_INCIDENTS } from './incidentMockData';
@@ -542,57 +542,321 @@ export const ARCHITECTURAL_DATA_FLOWS = [
   { fromFacility: "FAC-TYO-01", toFacility: "FAC-IAD-01", label: "Shadow Canaries ➔ Sync Bus" },
 ];
 
+const REGION_GEO_MAP: Record<
+  string,
+  {
+    countryCode: string;
+    country: string;
+    city: string;
+    lat: number;
+    lng: number;
+    cloudRegion: string;
+    timezone: string;
+    compliance: string;
+    facilityId: string;
+  }
+> = {
+  US: {
+    countryCode: "US",
+    country: "United States of America",
+    city: "Ashburn",
+    lat: 39.0438,
+    lng: -77.4874,
+    cloudRegion: "us-east-1",
+    timezone: "America/New_York",
+    compliance: "US SOC 2 / FedRAMP Moderate",
+    facilityId: "FAC-IAD-01",
+  },
+  DE: {
+    countryCode: "DE",
+    country: "Germany",
+    city: "Frankfurt",
+    lat: 50.1109,
+    lng: 8.6821,
+    cloudRegion: "eu-central-1",
+    timezone: "Europe/Berlin",
+    compliance: "EU GDPR / BSI C5 Tier 3",
+    facilityId: "FAC-FRA-01",
+  },
+  IN: {
+    countryCode: "IN",
+    country: "India",
+    city: "Mumbai",
+    lat: 19.0760,
+    lng: 72.8777,
+    cloudRegion: "ap-south-1",
+    timezone: "Asia/Kolkata",
+    compliance: "India CERT-In / ISO 27001",
+    facilityId: "FAC-BOM-01",
+  },
+  GB: {
+    countryCode: "GB",
+    country: "United Kingdom",
+    city: "London",
+    lat: 51.5074,
+    lng: -0.1278,
+    cloudRegion: "eu-west-2",
+    timezone: "Europe/London",
+    compliance: "UK Cyber Essentials Plus / DPA",
+    facilityId: "FAC-LON-01",
+  },
+  JP: {
+    countryCode: "JP",
+    country: "Japan",
+    city: "Tokyo",
+    lat: 35.6762,
+    lng: 139.6503,
+    cloudRegion: "ap-northeast-1",
+    timezone: "Asia/Tokyo",
+    compliance: "Japan APPI / ISMAP Core",
+    facilityId: "FAC-TYO-01",
+  },
+  BR: {
+    countryCode: "BR",
+    country: "Brazil",
+    city: "Sao Paulo",
+    lat: -23.5505,
+    lng: -46.6333,
+    cloudRegion: "sa-east-1",
+    timezone: "America/Sao_Paulo",
+    compliance: "Brazil LGPD Tier-2",
+    facilityId: "FAC-GRU-01",
+  },
+  FR: {
+    countryCode: "FR",
+    country: "France",
+    city: "Paris",
+    lat: 48.8566,
+    lng: 2.3522,
+    cloudRegion: "eu-west-3",
+    timezone: "Europe/Paris",
+    compliance: "ANSSI SecNumCloud / GDPR",
+    facilityId: "FAC-FRA-01",
+  },
+  SG: {
+    countryCode: "SG",
+    country: "Singapore",
+    city: "Singapore",
+    lat: 1.3521,
+    lng: 103.8198,
+    cloudRegion: "ap-southeast-1",
+    timezone: "Asia/Singapore",
+    compliance: "MAS TRM / ISO 27001",
+    facilityId: "FAC-TYO-01",
+  },
+  AU: {
+    countryCode: "AU",
+    country: "Australia",
+    city: "Sydney",
+    lat: -33.8688,
+    lng: 151.2093,
+    cloudRegion: "ap-southeast-2",
+    timezone: "Australia/Sydney",
+    compliance: "Australia ISM / Essential Eight",
+    facilityId: "FAC-TYO-01",
+  },
+  CA: {
+    countryCode: "CA",
+    country: "Canada",
+    city: "Toronto",
+    lat: 43.6532,
+    lng: -79.3832,
+    cloudRegion: "ca-central-1",
+    timezone: "America/Toronto",
+    compliance: "Canada PIPEDA / SOC 2",
+    facilityId: "FAC-IAD-01",
+  },
+  NL: {
+    countryCode: "NL",
+    country: "Netherlands",
+    city: "Amsterdam",
+    lat: 52.3676,
+    lng: 4.9041,
+    cloudRegion: "eu-central-2",
+    timezone: "Europe/Amsterdam",
+    compliance: "EU GDPR / BIO",
+    facilityId: "FAC-FRA-01",
+  },
+};
+
+function resolveGeoAndFacility(
+  server: ServerResponse | null,
+  nodeInv: NodeInventory | null,
+  idx: number
+) {
+  const specs = (server?.specs as Record<string, unknown>) || {};
+  const rawCountry = (specs.country as string) || (specs.countryCode as string) || "";
+  const rawLocation = (specs.location as string) || nodeInv?.location || "";
+  const rawCity = (specs.city as string) || "";
+
+  let matchedCode = rawCountry.toUpperCase();
+  if (!matchedCode || !REGION_GEO_MAP[matchedCode]) {
+    const locLower = `${rawLocation} ${server?.hostname || ""} ${nodeInv?.hostname || ""}`.toLowerCase();
+    if (locLower.includes("germany") || locLower.includes("frankfurt") || locLower.includes("de")) matchedCode = "DE";
+    else if (locLower.includes("india") || locLower.includes("mumbai") || locLower.includes("in")) matchedCode = "IN";
+    else if (locLower.includes("uk") || locLower.includes("london") || locLower.includes("gb")) matchedCode = "GB";
+    else if (locLower.includes("japan") || locLower.includes("tokyo") || locLower.includes("jp")) matchedCode = "JP";
+    else if (locLower.includes("brazil") || locLower.includes("sao paulo") || locLower.includes("br")) matchedCode = "BR";
+    else if (locLower.includes("france") || locLower.includes("paris") || locLower.includes("fr")) matchedCode = "FR";
+    else if (locLower.includes("singapore") || locLower.includes("sg")) matchedCode = "SG";
+    else if (locLower.includes("australia") || locLower.includes("sydney") || locLower.includes("au")) matchedCode = "AU";
+    else if (locLower.includes("canada") || locLower.includes("toronto") || locLower.includes("ca")) matchedCode = "CA";
+    else if (locLower.includes("netherlands") || locLower.includes("amsterdam") || locLower.includes("nl")) matchedCode = "NL";
+    else matchedCode = "US";
+  }
+
+  const preset = REGION_GEO_MAP[matchedCode] || REGION_GEO_MAP.US;
+  const facility = CANONICAL_FACILITIES[preset.facilityId] || CANONICAL_FACILITIES["FAC-IAD-01"];
+
+  const latOffset = ((idx % 5) - 2) * 0.04;
+  const lngOffset = (((idx * 2) % 5) - 2) * 0.04;
+
+  const geo: NodeGeo = {
+    lat: preset.lat + latOffset,
+    lng: preset.lng + lngOffset,
+    city: rawCity || preset.city,
+    country: preset.country,
+    countryCode: preset.countryCode,
+    cloudRegion: `${preset.cloudRegion}${String.fromCharCode(97 + (idx % 3))}`,
+    timezone: preset.timezone,
+    compliance: preset.compliance,
+  };
+
+  const placement: NodePlacement = {
+    floor: (idx % 4) + 1,
+    floorName: facility.floors[(idx % 4) + 1]?.label || facility.floors[1]?.label || "Compute Tier",
+    row: `Row ${String.fromCharCode(65 + (idx % 6))}`,
+    rack: `Rack ${String((idx % 12) + 1).padStart(2, "0")}`,
+    unit: `U${String(((idx * 4) % 36) + 4).padStart(2, "0")}`,
+  };
+
+  return { geo, facility, placement };
+}
+
 /**
- * Merge live backend nodes with the rich canonical dataset
+ * Builds live real-time topology nodes from backend servers, inventory nodes, and alerts.
+ * If zero live servers/nodes are returned, safely falls back to the canonical offline dataset.
  */
-export function buildHolisticNodes(nodes: NodeInventory[] = [], servers: ServerResponse[] = []): TopologyNode[] {
-  const list = structuredClone(INITIAL_TOPOLOGY_NODES);
+export function buildHolisticNodes(
+  nodes: NodeInventory[] = [],
+  servers: ServerResponse[] = [],
+  alerts: AlertPayload[] = []
+): TopologyNode[] {
+  const hasLiveData = servers.length > 0 || nodes.length > 0;
+  if (!hasLiveData) {
+    return structuredClone(INITIAL_TOPOLOGY_NODES);
+  }
 
-  nodes.forEach((n, idx) => {
-    // Only append if not already in canonical list
-    const existing = list.find((item) => item.id === n.id || item.name === n.hostname);
-    if (existing) {
-      existing.cpu = typeof n.cpu === "number" ? n.cpu : existing.cpu;
-      existing.memory = typeof n.memoryUsed === "number" ? n.memoryUsed : existing.memory;
-      return;
-    }
+  const list: TopologyNode[] = [];
+  const seenIds = new Set<string>();
 
-    const matchServer = servers.find((s) => s.id === n.id || s.hostname === n.hostname);
-    const isTampered = Boolean(n.threats > 0 || (n.status && ["critical", "error"].includes(n.status.toLowerCase())));
+  // Process live registered servers
+  servers.forEach((s, idx) => {
+    seenIds.add(s.id);
+    const nodeInv = nodes.find((n) => n.id === s.id || n.hostname === s.hostname);
+    const matchingAlerts = alerts.filter(
+      (a) => a.server_id === s.id || a.hostname === s.hostname
+    );
+    const hasTamperAlert = matchingAlerts.some((a) =>
+      /crit|high|tamper|inject|breach/i.test(`${a.severity || ""} ${a.event_type || ""}`)
+    );
+    const isOffline =
+      s.status?.toLowerCase() === "offline" ||
+      nodeInv?.status?.toLowerCase() === "offline";
+    const status: TopologyNode["status"] = isOffline
+      ? "offline"
+      : hasTamperAlert
+      ? "tampered"
+      : matchingAlerts.length > 0
+      ? "warning"
+      : "healthy";
+
+    const geoAndFac = resolveGeoAndFacility(s, nodeInv ?? null, idx);
+    const latestAlert = matchingAlerts[0];
 
     list.push({
-      id: n.id || `node-${idx}`,
-      name: n.hostname || matchServer?.hostname || `node-${n.id.slice(0, 8)}`,
-      ip: n.ip || matchServer?.ip_address || "10.0.4.x",
-      region: n.location || "Managed Node",
-      cluster: "Live Cluster Nodes",
+      id: s.id,
+      name: s.hostname,
+      ip: s.ip_address || nodeInv?.ip || "10.0.0.1",
+      region: geoAndFac.geo.cloudRegion,
+      cluster: s.project_id ? `Project ${s.project_id.slice(0, 8)}` : "Production VPC",
       type: "server",
-      status: isTampered ? "tampered" : n.status === "warning" ? "warning" : "healthy",
-      tampered: isTampered,
-      tamperReason: isTampered ? "Abnormal telemetry divergence & threat flag raised" : undefined,
-      tamperVector: isTampered ? "Live Sensor Telemetry Anomaly" : undefined,
-      tamperTime: isTampered ? "Active" : undefined,
+      status,
+      tampered: status === "tampered",
+      tamperReason: latestAlert
+        ? `${latestAlert.event_type} (${latestAlert.severity})`
+        : undefined,
+      tamperVector: latestAlert ? latestAlert.event_type : undefined,
+      tamperTime: latestAlert ? latestAlert.detected_at : undefined,
+      cpu: typeof nodeInv?.cpu === "number" ? nodeInv.cpu : 35,
+      memory: typeof nodeInv?.memoryUsed === "number" ? nodeInv.memoryUsed : 45,
+      threats: matchingAlerts.length,
+      geo: geoAndFac.geo,
+      facility: geoAndFac.facility,
+      placement: geoAndFac.placement,
+      incident: latestAlert
+        ? {
+            id: latestAlert.id,
+            nodeId: s.id,
+            vector: latestAlert.event_type,
+            detectedAt: latestAlert.detected_at,
+            state: "active",
+          }
+        : undefined,
+    });
+  });
+
+  // Include any inventory nodes not already in the servers list
+  nodes.forEach((n, idx) => {
+    if (seenIds.has(n.id)) return;
+    seenIds.add(n.id);
+    const matchingAlerts = alerts.filter(
+      (a) => a.server_id === n.id || a.hostname === n.hostname
+    );
+    const hasTamperAlert = matchingAlerts.some((a) =>
+      /crit|high|tamper|inject|breach/i.test(`${a.severity || ""} ${a.event_type || ""}`)
+    );
+    const isOffline = n.status?.toLowerCase() === "offline";
+    const status: TopologyNode["status"] = isOffline
+      ? "offline"
+      : hasTamperAlert
+      ? "tampered"
+      : matchingAlerts.length > 0
+      ? "warning"
+      : "healthy";
+
+    const geoAndFac = resolveGeoAndFacility(null, n, servers.length + idx);
+    const latestAlert = matchingAlerts[0];
+
+    list.push({
+      id: n.id,
+      name: n.hostname || n.name || n.host || n.server_hostname || `node-${idx + 1}`,
+      ip: n.ip || "10.0.0.1",
+      region: geoAndFac.geo.cloudRegion,
+      cluster: "Managed Fleet",
+      type: "server",
+      status,
+      tampered: status === "tampered",
+      tamperReason: latestAlert
+        ? `${latestAlert.event_type} (${latestAlert.severity})`
+        : undefined,
+      tamperVector: latestAlert ? latestAlert.event_type : undefined,
+      tamperTime: latestAlert ? latestAlert.detected_at : undefined,
       cpu: typeof n.cpu === "number" ? n.cpu : 35,
       memory: typeof n.memoryUsed === "number" ? n.memoryUsed : 45,
-      threats: n.threats || 0,
-      geo: {
-        lat: 39.0438 + (idx * 0.05),
-        lng: -77.4874 + (idx * 0.05),
-        city: "Ashburn",
-        country: "United States of America",
-        countryCode: "US",
-        cloudRegion: "us-east-1d",
-        timezone: "America/New_York",
-        compliance: "US SOC 2",
-      },
-      facility: CANONICAL_FACILITIES["FAC-IAD-01"],
-      placement: {
-        floor: 3,
-        floorName: "Floor 3: App & API Compute Tier",
-        row: "Row C",
-        rack: `Rack ${String(idx + 1).padStart(2, "0")}`,
-        unit: "U08",
-      },
+      threats: n.threats || matchingAlerts.length,
+      geo: geoAndFac.geo,
+      facility: geoAndFac.facility,
+      placement: geoAndFac.placement,
+      incident: latestAlert
+        ? {
+            id: latestAlert.id,
+            nodeId: n.id,
+            vector: latestAlert.event_type,
+            detectedAt: latestAlert.detected_at,
+            state: "active",
+          }
+        : undefined,
     });
   });
 
