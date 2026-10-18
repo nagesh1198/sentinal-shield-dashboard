@@ -35,3 +35,29 @@ test("INV-RBAC-P3-3: src/app/login/page.tsx must not contain hardcoded persona s
     "Login page must not expose instant persona login shortcuts"
   );
 });
+
+// INV-RBAC-P3-4: src/app/login/page.tsx must not contain SSO integrations (Google / Active Directory)
+test("INV-RBAC-P3-4: src/app/login/page.tsx must not contain SSO integrations", () => {
+  const content = fs.readFileSync("src/app/login/page.tsx", "utf8");
+  assert.ok(
+    !content.includes("Active Directory"),
+    "Login page must not display Active Directory SSO"
+  );
+  assert.ok(
+    !content.includes("or SSO Single Sign-On"),
+    "Login page must not display SSO Single Sign-On divider"
+  );
+  assert.ok(
+    !content.includes("Google\n            </button>"),
+    "Login page must not display Google SSO button"
+  );
+});
+
+// INV-RBAC-P3-5: src/app/login/page.tsx must not contain hardcoded default mock-acme tenant
+test("INV-RBAC-P3-5: src/app/login/page.tsx must not hardcode default mock-acme tenant", () => {
+  const content = fs.readFileSync("src/app/login/page.tsx", "utf8");
+  assert.ok(
+    !content.includes("mock-acme"),
+    "Login page must not contain default mock-acme tenant name, placeholder, or fallback"
+  );
+});
