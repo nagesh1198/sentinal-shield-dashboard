@@ -25,11 +25,13 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               // 'unsafe-eval' is required because @bible-strong/avatar-core relies on Ajv schema compilation
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+              "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:",
+              "worker-src 'self' blob:",
+              "child-src 'self' blob:",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
-              "font-src 'self' data:",
-              "connect-src 'self' https://ec2-3-89-18-5.compute-1.amazonaws.com",
+              "font-src 'self' data: https://tiles.openfreemap.org",
+              "connect-src 'self' https://ec2-3-89-18-5.compute-1.amazonaws.com https://tiles.openfreemap.org https://*.openfreemap.org",
               "object-src 'none'",
               "base-uri 'self'",
               "frame-ancestors 'none'",

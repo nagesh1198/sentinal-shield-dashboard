@@ -368,7 +368,12 @@ export function ManagedInfrastructure() {
       }
     });
 
-    return list;
+    // Prioritize online servers at the top of the list
+    return list.sort((a, b) => {
+      if (a.isOnline && !b.isOnline) return -1;
+      if (!a.isOnline && b.isOnline) return 1;
+      return a.hostname.localeCompare(b.hostname);
+    });
   }, [nodes, servers, agents, decoys]);
 
   const onlineServersCount = mergedServersList.filter((s) => s.isOnline).length;

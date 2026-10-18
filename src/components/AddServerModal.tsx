@@ -220,7 +220,7 @@ export function AddServerModal({ isOpen, onClose, onSuccess, initialTenant }: Ad
             project_id: targetProjectId,
             hostname: form.name.trim(),
             ip_address: form.ip.trim(),
-            status: "provisioning",
+            status: "online",
             specs: {
               location: formattedLocation,
               country: form.country,

@@ -56,3 +56,18 @@ test("INV-P3-3: src/components/AddServerModal.tsx must integrate projectService 
     "AddServerModal must fetch available projects"
   );
 });
+
+// INV-P3-4: AddServerModal sends status "online" when creating a server
+test("INV-P3-4: AddServerModal must create servers with status 'online' rather than 'provisioning'", () => {
+  const content = fs.readFileSync("src/components/AddServerModal.tsx", "utf8");
+  assert.match(
+    content,
+    /status:\s*["']online["']/,
+    "AddServerModal must send status: 'online' in serverService.createServer payload"
+  );
+  assert.doesNotMatch(
+    content,
+    /status:\s*["']provisioning["']/,
+    "AddServerModal must not send status: 'provisioning'"
+  );
+});

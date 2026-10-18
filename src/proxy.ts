@@ -4,10 +4,11 @@ import type { NextRequest } from "next/server";
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow static files, Next.js internal assets, health checks, and public login endpoints
+  // Allow static files, Next.js internal assets, health checks, incident brief API, and public login endpoints
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/health") ||
+    pathname.startsWith("/api/incident-brief") ||
     pathname.startsWith("/api/v1/auth/login") ||
     pathname === "/login" ||
     pathname.includes(".")

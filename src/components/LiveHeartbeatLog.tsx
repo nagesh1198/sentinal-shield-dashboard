@@ -94,7 +94,6 @@ export function LiveHeartbeatLog({
   const lastStateRef = useRef<string>("");
   const lastGlobalSyncRef = useRef<string>("");
   const lastNodeStatesRef = useRef<Map<string, string>>(new Map());
-  const tickCounterRef = useRef<number>(0);
 
   const appendEntry = useCallback((tag: Tag, msg: string, customTs?: string) => {
     setEntries((prev) => {
@@ -159,181 +158,80 @@ export function LiveHeartbeatLog({
           .catch(() => [] as NodeInventory[]);
         if (!active) return;
 
-        tickCounterRef.current += 1;
-        const isPulseTick = tickCounterRef.current % 3 === 0;
-
         if (nodeId) {
-          // Per-node Telemetry Card: Resolve target across serverData, nodes, servers, agents, and known catalog
-          let target: any = null;
+          // Strict Real Heartbeat: only consider node connected and emitting pulses
+          // if an actual active telemetry record exists in GET /api/v1/dashboard/nodes
+          let telemetryMatch: NodeInventory | undefined;
 
-          // 1. Direct serverData passed from parent card
-          if (serverData) {
-            target = {
-              id: serverData.serverId || serverData.id || nodeId,
-              hostname: serverData.hostname || "Cluster Node",
-              ip: serverData.ip || "10.0.0.1",
-              status: serverData.status || (serverData.isOnline ? "online" : "offline"),
-              cpu: typeof serverData.cpu === "number" ? serverData.cpu : null,
-              memoryUsed: typeof serverData.memoryUsed === "number" ? serverData.memoryUsed : null,
-              memoryTotal: typeof serverData.memoryTotal === "number" ? serverData.memoryTotal : null,
-              threats: serverData.threats || 0,
-              location: serverData.location || "Cluster Infrastructure",
-            };
-          }
-
-          // Check if nodes has fresh dynamic telemetry for this node
           if (Array.isArray(nodes) && nodes.length > 0) {
             const rawIp = (nodeId || "").split("/")[0].trim();
-            const telemetryMatch = nodes.find(
+            telemetryMatch = nodes.find(
               (n) =>
                 n.id === nodeId ||
                 n.server_id === nodeId ||
                 n.serverId === nodeId ||
-                (target && (n.id === target.id || (target.ip && n.ip && n.ip.startsWith(rawIp))))
+                (serverData && (
+                  n.id === serverData.id ||
+                  n.id === serverData.serverId ||
+                  (serverData.ip && n.ip && (n.ip === serverData.ip || n.ip.startsWith(rawIp)))
+                ))
             );
-            if (telemetryMatch) {
-              if (!target) {
-                target = {
-                  id: telemetryMatch.id,
-                  hostname: telemetryMatch.hostname || telemetryMatch.name || "Telemetry Node",
-                  ip: telemetryMatch.ip || "10.0.1.x",
-                  status: telemetryMatch.status || "online",
-                  cpu: typeof telemetryMatch.cpu === "number" ? telemetryMatch.cpu : null,
-                  memoryUsed: typeof telemetryMatch.memoryUsed === "number" ? telemetryMatch.memoryUsed : null,
-                  memoryTotal: typeof telemetryMatch.memoryTotal === "number" ? telemetryMatch.memoryTotal : null,
-                  threats: telemetryMatch.threats || 0,
-                  location: telemetryMatch.location || "Cluster Node",
-                };
-              } else {
-                if (typeof telemetryMatch.cpu === "number") target.cpu = telemetryMatch.cpu;
-                if (typeof telemetryMatch.memoryUsed === "number") target.memoryUsed = telemetryMatch.memoryUsed;
-                if (typeof telemetryMatch.memoryTotal === "number") target.memoryTotal = telemetryMatch.memoryTotal;
-                if (telemetryMatch.threats !== undefined) target.threats = telemetryMatch.threats;
-                if (telemetryMatch.status) target.status = telemetryMatch.status;
-              }
-            }
           }
 
-          // 2. Check servers from serverService
-          if (!target) {
-            try {
-              const serversRes: any = await serverService.listServers();
-              const serversList: ServerResponse[] = Array.isArray(serversRes)
-                ? serversRes
-                : Array.isArray(serversRes?.data)
-                ? serversRes.data
-                : [];
-              const s = serversList.find(
-                (srv) =>
-                  srv.id === nodeId ||
-                  srv.hostname?.toLowerCase() === nodeId.toLowerCase() ||
-                  srv.ip_address === nodeId
-              );
-              if (s) {
-                target = {
-                  id: s.id,
-                  hostname: s.hostname,
-                  ip: s.ip_address || "10.0.0.1",
-                  status: s.status || "online",
-                  cpu: typeof (s as any).cpu === "number" ? (s as any).cpu : null,
-                  memoryUsed: typeof (s as any).memoryUsed === "number" ? (s as any).memoryUsed : null,
-                  memoryTotal: typeof (s as any).memoryTotal === "number" ? (s as any).memoryTotal : null,
-                  threats: 0,
-                  location: "Cluster Infrastructure",
-                };
-              }
-            } catch {
-              // ignore
-            }
-          }
-
-          // 3. Check agents from agentService
-          if (!target) {
-            try {
-              const agentsRes: any = await agentService.listAgents();
-              const agentsList = Array.isArray(agentsRes)
-                ? agentsRes
-                : Array.isArray(agentsRes?.data)
-                ? agentsRes.data
-                : [];
-              const a = agentsList.find(
-                (ag: any) =>
-                  ag.id === nodeId ||
-                  ag.server_id === nodeId ||
-                  ag.agent_id === nodeId ||
-                  ag.hostname?.toLowerCase() === nodeId.toLowerCase()
-              );
-              if (a) {
-                target = {
-                  id: (a as any).server_id || a.id,
-                  hostname: (a as any).server_hostname || (a as any).hostname || "Connected Agent",
-                  ip: (a as any).server_ip || (a as any).ip || "10.0.0.1",
-                  status: (a as any).status || "online",
-                  cpu: typeof (a as any).cpu === "number" ? (a as any).cpu : null,
-                  memoryUsed: typeof (a as any).memoryUsed === "number" ? (a as any).memoryUsed : null,
-                  memoryTotal: typeof (a as any).memoryTotal === "number" ? (a as any).memoryTotal : null,
-                  threats: 0,
-                  location: "Cluster Node",
-                };
-              }
-            } catch {
-              // ignore
-            }
-          }
-
-          if (target) {
+          if (telemetryMatch) {
             const isOnline = ["online", "active", "healthy"].includes(
-              (target.status || "").toLowerCase()
+              (telemetryMatch.status || "").toLowerCase()
             );
             setConnected(isOnline);
 
-            const hasCpu = typeof target.cpu === "number";
-            const hasMem = typeof target.memoryUsed === "number";
-            const cpu = hasCpu ? Math.round(target.cpu) : null;
+            const hasCpu = typeof telemetryMatch.cpu === "number";
+            const hasMem = typeof telemetryMatch.memoryUsed === "number";
+            const cpu = hasCpu ? Math.round(telemetryMatch.cpu!) : null;
             const mem =
-              hasMem && target.memoryTotal
-                ? Math.round((target.memoryUsed / target.memoryTotal) * 100)
-                : typeof target.memoryUsed === "number"
-                  ? Math.round(target.memoryUsed)
+              hasMem && telemetryMatch.memoryTotal
+                ? Math.round((telemetryMatch.memoryUsed! / telemetryMatch.memoryTotal) * 100)
+                : typeof telemetryMatch.memoryUsed === "number"
+                  ? Math.round(telemetryMatch.memoryUsed)
                   : null;
 
             const telemetryDetails = [
               cpu !== null ? `CPU: ${cpu}%` : null,
               mem !== null ? `Mem: ${mem}%` : null,
-              `IP: ${target.ip}`,
+              `IP: ${telemetryMatch.ip || serverData?.ip || "N/A"}`,
             ]
               .filter(Boolean)
               .join(" | ");
 
-            const stateSnapshot = `${target.status}-${cpu}-${mem}-${target.threats || 0}`;
+            const stateSnapshot = `${telemetryMatch.status}-${cpu}-${mem}-${telemetryMatch.threats || 0}`;
 
             if (isOnline) {
-              // Log heartbeat pulse on change or pulse tick
-              if (lastStateRef.current !== stateSnapshot || isPulseTick) {
+              // Only log when genuine telemetry changes
+              if (lastStateRef.current !== stateSnapshot) {
                 appendEntry(
                   "HEARTBEAT",
-                  `Daemon pulse ACK: ${target.status.toUpperCase()} | ${telemetryDetails}`
+                  `Daemon pulse ACK: ${telemetryMatch.status.toUpperCase()} | ${telemetryDetails}`
                 );
               }
 
-              if (target.threats > 0 && lastStateRef.current !== stateSnapshot) {
+              if (telemetryMatch.threats > 0 && lastStateRef.current !== stateSnapshot) {
                 appendEntry(
                   "WATCH",
-                  `Active threats flagged: ${target.threats} incident(s) under observation`
+                  `Active threats flagged: ${telemetryMatch.threats} incident(s) under observation`
                 );
               }
             } else if (lastStateRef.current !== stateSnapshot) {
               appendEntry(
                 "OFFLINE",
-                `Node status: ${target.status.toUpperCase()} — heartbeat unacknowledged`
+                `Node status: ${telemetryMatch.status.toUpperCase()} — heartbeat unacknowledged`
               );
             }
             lastStateRef.current = stateSnapshot;
           } else {
+            // Strict mode: No live telemetry in nodes API -> not connected, no fake pulse!
             setConnected(false);
-            if (lastStateRef.current !== "not-found") {
-              appendEntry("OFFLINE", `Node not found in active cluster registry`);
-              lastStateRef.current = "not-found";
+            if (lastStateRef.current !== "no-telemetry") {
+              appendEntry("OFFLINE", `Awaiting initial daemon heartbeat from node telemetry`);
+              lastStateRef.current = "no-telemetry";
             }
           }
         } else {
@@ -353,7 +251,7 @@ export function LiveHeartbeatLog({
             lastGlobalSyncRef.current = syncKey;
           }
 
-          // For each active node, emit its heartbeat pulse if telemetry changed or on pulse tick
+          // For each active node, emit its heartbeat pulse only when telemetry actually updates
           onlineNodes.forEach((n) => {
             const cpu = typeof n.cpu === "number" ? Math.round(n.cpu) : 0;
             const mem =
@@ -363,10 +261,10 @@ export function LiveHeartbeatLog({
                   ? Math.round(n.memoryUsed)
                   : 0;
 
-            const nodeSnapshot = `${n.status}-${cpu}-${mem}-${n.threats}`;
+            const nodeSnapshot = `${n.id}-${n.status}-${cpu}-${mem}-${n.threats}`;
             const prev = lastNodeStatesRef.current.get(n.id);
 
-            if (prev !== nodeSnapshot || isPulseTick) {
+            if (prev !== nodeSnapshot) {
               appendEntry(
                 "HEARTBEAT",
                 `[${n.id}] Pulse ACK: ${n.status.toUpperCase()} | ${n.location || "Cluster"} | IP: ${n.ip} | CPU: ${cpu}% | Mem: ${mem}%`

@@ -131,7 +131,7 @@ export default function Home() {
           s.hostname || "Server",
           s.ip_address || "N/A",
           (s.specs?.location as string) || (s.specs?.country as string) || "Global",
-          s.status || "provisioning",
+          s.status || "online",
           "N/A",
           "N/A",
           0,

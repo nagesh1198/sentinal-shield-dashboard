@@ -44,7 +44,7 @@ function decodeJwt(token: string): DecodedToken | null {
   }
 }
 
-export function Topnav({ toggleSidebar }: { toggleSidebar: () => void }) {
+export function Topnav({ toggleSidebar, offline = false }: { toggleSidebar: () => void; offline?: boolean }) {
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
   const [userName, setUserName] = useState("LA");
   const [userProfile, setUserProfile] = useState<DecodedToken | null>(null);
@@ -53,7 +53,7 @@ export function Topnav({ toggleSidebar }: { toggleSidebar: () => void }) {
 
   useEffect(() => {
     // Health check
-    checkHealth()
+    if (!offline) checkHealth()
       .then(() => setApiOnline(true))
       .catch(() => setApiOnline(false));
 
@@ -79,7 +79,7 @@ export function Topnav({ toggleSidebar }: { toggleSidebar: () => void }) {
         setUserProfile(decoded);
       }
     }
-  }, []);
+  }, [offline]);
 
   const { role, permissions, isPlatformAdmin, isTenantAdmin, isAnalyst, isReadOnly } = usePermissions();
 

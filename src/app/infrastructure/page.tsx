@@ -438,7 +438,12 @@ export default function InfrastructurePage() {
       }
     });
 
-    return list;
+    // Prioritize online servers at the top of the list
+    return list.sort((a, b) => {
+      if (a.isOnline && !b.isOnline) return -1;
+      if (!a.isOnline && b.isOnline) return 1;
+      return a.hostname.localeCompare(b.hostname);
+    });
   }, [nodes, servers, agents, getDecoysForServer]);
 
   // Online and decoy metrics

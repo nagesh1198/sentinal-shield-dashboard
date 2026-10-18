@@ -4,10 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Topnav } from "@/components/Topnav";
 import { Sidebar } from "@/components/Sidebar";
-import { SentinelGuide } from "@/components/SentinelGuide";
 import { isAuthenticated } from "@/lib/auth";
 
-export function DashboardLayout({ children }: { children: React.ReactNode }) {
+export function DashboardLayout({ children, offline = false }: { children: React.ReactNode; offline?: boolean }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
   const router = useRouter();
@@ -37,7 +36,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Topnav toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
+      <Topnav offline={offline} toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
       <Sidebar isOpen={isSidebarOpen} />
       <main
         className={`mt-16 p-5 overflow-y-auto h-[calc(100vh-64px)] scroll-smooth bg-surface transition-all duration-300 ${
@@ -46,7 +45,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       >
         {children}
       </main>
-      <SentinelGuide />
     </>
   );
 }

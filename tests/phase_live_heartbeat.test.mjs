@@ -50,3 +50,17 @@ test("INV-LIVE-4: LiveHeartbeatLog must de-duplicate sync spam and emit per-node
   );
 });
 
+// INV-LIVE-5: LiveHeartbeatLog must strictly verify against nodes telemetry and never fabricate pulse ticks
+test("INV-LIVE-5: LiveHeartbeatLog must require telemetryMatch and eliminate fake isPulseTick ticks", () => {
+  const content = fs.readFileSync("src/components/LiveHeartbeatLog.tsx", "utf8");
+  assert.ok(
+    !content.includes("isPulseTick"),
+    "LiveHeartbeatLog must not contain synthetic isPulseTick pulse generator"
+  );
+  assert.ok(
+    content.includes("telemetryMatch"),
+    "LiveHeartbeatLog must require an active telemetryMatch from nodes telemetry before acknowledging heartbeats"
+  );
+});
+
+

@@ -7,7 +7,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutDashboard, BellRing, Radar, FileText,
   Server, Settings, Shield, HelpCircle, LogOut,
-  SlidersHorizontal, Bot, KeyRound,
+  SlidersHorizontal, Bot, KeyRound, Orbit,
 } from "lucide-react";
 
 const navMain = [
@@ -16,6 +16,7 @@ const navMain = [
   { href: "/detections", icon: Radar, label: "Detections" },
   { href: "/logs", icon: FileText, label: "Logs" },
   { href: "/infrastructure", icon: Server, label: "Infrastructure" },
+  { href: "/holistic", icon: Orbit, label: "Holistic View" },
   { href: "/agents", icon: Bot, label: "Agents" },
   { href: "/keys", icon: KeyRound, label: "API Keys" },
   { href: "/automation", icon: Settings, label: "Automation" },

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { usePathname } from "next/navigation";
+import { isAuthenticated } from "@/lib/auth";
 import {
   X,
   ChevronRight,
@@ -247,6 +249,8 @@ const STORAGE_DISMISSED_KEY = "sentinel_tour_dismissed";
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function SentinelGuide() {
+  const pathname = usePathname();
+  const isLoginPage = pathname === "/login" || (pathname != null && pathname.startsWith("/login"));
   const [isActive, setIsActive] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [showAvatar, setShowAvatar] = useState(false);
@@ -265,6 +269,13 @@ export function SentinelGuide() {
 
   // ── Auto-start on first visit ──
   useEffect(() => {
+    if (isLoginPage || !isAuthenticated()) {
+      setShowAvatar(false);
+      setIsActive(false);
+      setShowTooltip(false);
+      return;
+    }
+
     setShowAvatar(true);
     const completed = localStorage.getItem(STORAGE_KEY);
     const dismissed = localStorage.getItem(STORAGE_DISMISSED_KEY);
@@ -281,7 +292,7 @@ export function SentinelGuide() {
         if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
       };
     }
-  }, []);
+  }, [isLoginPage, pathname]);
 
   // ── Reposition mascot & bubble precisely for step ──
   const updatePositionForCurrentStep = useCallback((stepIdx: number) => {
@@ -474,7 +485,7 @@ export function SentinelGuide() {
   const step = TOUR_STEPS[currentStep];
   const progress = ((currentStep + 1) / TOUR_STEPS.length) * 100;
 
-  if (!showAvatar) return null;
+  if (isLoginPage || !showAvatar || !isAuthenticated()) return null;
 
   return (
     <>
