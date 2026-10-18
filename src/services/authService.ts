@@ -6,6 +6,7 @@ import type {
   Permission,
 } from "@/lib/types";
 import { ROLE_PERMISSIONS, KNOWN_PERSONAS } from "@/lib/types";
+import { normalizeRole as normalizeRoleShared } from "@/lib/roles";
 
 const AUTH_KEY = "sentinel_authenticated";
 const TOKEN_KEY = "auth_token";
@@ -23,22 +24,7 @@ export interface UserSession {
  * Normalizes an arbitrary role string from the login API or JWT into a canonical UserRole.
  */
 export function normalizeRole(roleStr: unknown): UserRole | null {
-  if (typeof roleStr !== "string") return null;
-  const r = roleStr.trim().toLowerCase();
-  if (r in ROLE_PERMISSIONS) return r as UserRole;
-  if (r.includes("platform") || r.includes("owner") || r.includes("superadmin") || r.includes("global")) {
-    return "platform_owner";
-  }
-  if (r.includes("admin")) {
-    return "tenant-admin";
-  }
-  if (r.includes("analyst") || r.includes("operator")) {
-    return "security-analyst";
-  }
-  if (r.includes("read") || r.includes("viewer") || r.includes("audit") || r.includes("readonly")) {
-    return "read-only";
-  }
-  return null;
+  return normalizeRoleShared(roleStr); // rules live in @/lib/roles, shared with the server-side AI guard
 }
 
 /**

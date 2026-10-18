@@ -3,18 +3,20 @@
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { logout, getDashboardTitle } from "@/lib/auth";
+import { usePermissions } from "@/lib/rbac";
+import type { Permission } from "@/lib/types";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, BellRing, Radar, FileText,
-  Server, Settings, Shield, HelpCircle, LogOut,
-  SlidersHorizontal, Bot, KeyRound, Orbit,
+  SlidersHorizontal, Bot, KeyRound, Orbit, Sparkles,
 } from "lucide-react";
 
-const navMain = [
+const navMain: { href: string; icon: typeof FileText; label: string; permission?: Permission }[] = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/events", icon: BellRing, label: "Events" },
   { href: "/detections", icon: Radar, label: "Detections" },
   { href: "/logs", icon: FileText, label: "Logs" },
+  { href: "/ai-analysis", icon: Sparkles, label: "AI Analysis", permission: "ai.analyze" },
   { href: "/infrastructure", icon: Server, label: "Infrastructure" },
   { href: "/holistic", icon: Orbit, label: "Holistic View" },
   { href: "/agents", icon: Bot, label: "Agents" },
@@ -30,6 +32,7 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const [dashboardTitle, setDashboardTitle] = useState("Admin Dashboard");
+  const { can } = usePermissions();
 
   useEffect(() => {
     setDashboardTitle(getDashboardTitle());
@@ -61,7 +64,7 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
 
       <nav className="flex-1 space-y-1">
         {/* Main Nav */}
-        {navMain.map(({ href, icon: Icon, label }) => (
+        {navMain.filter((item) => !item.permission || can(item.permission)).map(({ href, icon: Icon, label }) => (
           <Link
             key={href}
             href={href}
