@@ -89,7 +89,7 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
             logout();
             router.push("/login");
           }}
-          className={`w-full text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded-full py-2 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`}
+          className={`text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded-full py-2 flex items-center transition-all duration-300 ${isOpen ? "mx-2 w-[calc(100%-1rem)] px-6 gap-4" : "mx-4 w-12 h-12 px-0 justify-center"}`}
         >
           <LogOut className="w-5 h-5 shrink-0" />
           {isOpen && <span className="font-medium text-sm whitespace-nowrap">Logout</span>}

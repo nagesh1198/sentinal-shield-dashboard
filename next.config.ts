@@ -5,6 +5,7 @@ const isDev = process.env.NODE_ENV !== "production";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  devIndicators: false,
   turbopack: {
     root: path.resolve(__dirname),
   },

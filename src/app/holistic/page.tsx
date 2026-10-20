@@ -10,17 +10,18 @@ import { IncidentBriefPanel } from "@/components/IncidentBriefPanel";
 import { explainIncident, hasActiveIncident } from "@/lib/incidentExplainer";
 import { isolateIncidentNode, isResponseSessionCurrent } from "@/lib/incidentContainment";
 import { getSessionUser, isAuthenticated, getToken } from "@/services/authService";
+import { projectService } from "@/services/projectService";
+import { resolveNodeProject } from "@/lib/nodeProject";
 import { serverService } from "@/services/serverService";
 import { nodeService } from "@/services/nodeService";
 import { dashboardService } from "@/services/dashboardService";
-import type { ServerResponse, NodeInventory, AlertPayload } from "@/lib/types";
+import type { ServerResponse, NodeInventory, AlertPayload, ProjectResponse } from "@/lib/types";
 import { hasPermission } from "@/lib/rbac";
 import { usePermissions } from "@/lib/rbac";
 import {
   TopologyNode,
-  buildHolisticNodes,
-  INITIAL_TOPOLOGY_NODES,
 } from "@/lib/holisticData";
+import { resolveLiveFleet, buildLiveTopology } from "@/lib/liveFleet";
 import { formatLocalTime } from "@/lib/geoUtils";
 import {
   ShieldAlert, ShieldCheck, Zap, RefreshCw,
@@ -55,14 +56,26 @@ function HolisticDashboardContent() {
   const canRespond = can("security.respond") || can("server.manage");
 
   // Shared state across both views
-  const [nodes, setNodes] = useState<TopologyNode[]>(INITIAL_TOPOLOGY_NODES);
+  const [nodes, setNodes] = useState<TopologyNode[]>([]);
   const nodesRef = useRef(nodes);
   const rawServersRef = useRef<ServerResponse[]>([]);
   const rawNodesRef = useRef<NodeInventory[]>([]);
   const rawAlertsRef = useRef<AlertPayload[]>([]);
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    projectService.listProjects()
+      .then((items) => { if (active) setProjects(items); })
+      .catch(() => { if (active) setProjectsFailed(true); })
+      .finally(() => { if (active) setProjectsLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = nodes.find(n => n.id === selectedNodeId) ?? null;
+  const selectedProject = resolveNodeProject(selectedNodeId, rawServersRef.current, projects);
   const selectNode = useCallback((node: TopologyNode | null) => setSelectedNodeId(node?.id ?? null), []);
   const [simulatedTamperNodeId, setSimulatedTamperNodeId] = useState<string | null>(null);
   const [lastSimulatedCountry, setLastSimulatedCountry] = useState<string>("US");
@@ -76,12 +89,21 @@ function HolisticDashboardContent() {
   const [lastUpdated, setLastUpdated] = useState<string>("Initializing...");
   const [isLiveFleet, setIsLiveFleet] = useState<boolean>(false);
 
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const inventoryReadyRef = useRef(false);
+  const fetchingRef = useRef(false);
+
   // AI Incident Brief slide-over state
   const [isBriefOpen, setIsBriefOpen] = useState(false);
 
   // Fetch real-time data from backend servers, nodes, and alerts
   const fetchRealtimeData = useCallback(async (isManual = false) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     if (isManual) setIsLoading(true);
+    if (!inventoryReadyRef.current) setInitialLoading(true);
+    setTelemetryError(null);
     try {
       const [serversRes, nodesRes, alertsRes] = await Promise.allSettled([
         serverService.listServers(),
@@ -89,9 +111,9 @@ function HolisticDashboardContent() {
         dashboardService.getAlerts(undefined, 50),
       ]);
 
-      const liveServers = serversRes.status === "fulfilled" ? serversRes.value : [];
-      const liveNodes = nodesRes.status === "fulfilled" ? nodesRes.value : [];
-      const liveAlerts = alertsRes.status === "fulfilled" && alertsRes.value?.data ? alertsRes.value.data : [];
+      const { liveServers, liveNodes, liveAlerts, builtNodes } = resolveLiveFleet(
+        serversRes, nodesRes, alertsRes, rawAlertsRef.current
+      );
 
       rawServersRef.current = liveServers;
       rawNodesRef.current = liveNodes;
@@ -100,7 +122,7 @@ function HolisticDashboardContent() {
       const hasLiveItems = liveServers.length > 0 || liveNodes.length > 0;
       setIsLiveFleet(hasLiveItems);
 
-      const builtNodes = buildHolisticNodes(liveNodes, liveServers, liveAlerts);
+      inventoryReadyRef.current = true;
       nodesRef.current = builtNodes;
       setNodes(builtNodes);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -109,12 +131,13 @@ function HolisticDashboardContent() {
         setActionMessage({
           text: hasLiveItems
             ? `Real-time telemetry synchronized (${liveServers.length} servers, ${liveAlerts.length} alerts).`
-            : "Live backend connected. Baseline digital twin mesh synchronized.",
+            : "Live backend connected. No servers found.",
           type: "success",
         });
       }
     } catch (err) {
       console.error("Failed to fetch real-time holistic data:", err);
+      setTelemetryError("Unable to load live topology. Please try again.");
       if (isManual) {
         setActionMessage({
           text: "Failed to refresh real-time telemetry from backend.",
@@ -122,6 +145,8 @@ function HolisticDashboardContent() {
         });
       }
     } finally {
+      fetchingRef.current = false;
+      setInitialLoading(false);
       if (isManual) setIsLoading(false);
     }
   }, []);
@@ -138,11 +163,11 @@ function HolisticDashboardContent() {
         es.onmessage = (event) => {
           try {
             const incomingAlert: AlertPayload = JSON.parse(event.data);
-            if (!incomingAlert?.id) return;
+            if (!incomingAlert?.id || !inventoryReadyRef.current) return;
 
             if (!rawAlertsRef.current.some((a) => a.id === incomingAlert.id)) {
               rawAlertsRef.current = [incomingAlert, ...rawAlertsRef.current].slice(0, 50);
-              const updated = buildHolisticNodes(
+              const updated = buildLiveTopology(
                 rawNodesRef.current,
                 rawServersRef.current,
                 rawAlertsRef.current
@@ -281,7 +306,7 @@ function HolisticDashboardContent() {
 
   // Reset simulation back to real-time baseline
   const handleResetSimulation = () => {
-    const restored = buildHolisticNodes(
+    const restored = buildLiveTopology(
       rawNodesRef.current,
       rawServersRef.current,
       rawAlertsRef.current
@@ -487,9 +512,27 @@ function HolisticDashboardContent() {
         </div>
       </div>
 
+      {telemetryError && inventoryReadyRef.current && (
+        <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <span>Live refresh failed. Showing the last successful snapshot.</span>
+          <button onClick={loadData} disabled={isLoading} className="font-semibold underline">Retry</button>
+        </div>
+      )}
+
       {/* Main Visualizer Stage (Mounts only one WebGL view at a time) */}
       <div className="relative">
-        {currentView === "topology" ? (
+        {initialLoading ? (
+          <div role="status" className="flex h-[650px] items-center justify-center gap-3 rounded-2xl border border-outline-variant/20 bg-[#060b13] text-white">
+            <RefreshCw className="h-5 w-5 animate-spin" aria-hidden /> Loading live topology…
+          </div>
+        ) : telemetryError && !inventoryReadyRef.current ? (
+          <div role="alert" className="flex h-[650px] flex-col items-center justify-center gap-4 rounded-2xl border border-outline-variant/20 bg-[#060b13] text-white">
+            <p>{telemetryError}</p>
+            <button onClick={loadData} className="rounded-full border border-white/30 px-5 py-2">Retry</button>
+          </div>
+        ) : nodes.length === 0 ? (
+          <div role="status" className="flex h-[650px] items-center justify-center rounded-2xl border border-outline-variant/20 bg-[#060b13] text-white">No live servers found.</div>
+        ) : currentView === "topology" ? (
           <Holistic3DView
             topologyNodes={nodes}
             simulatedTamperNodeId={simulatedTamperNodeId}
@@ -514,17 +557,17 @@ function HolisticDashboardContent() {
 
         {/* Enhanced Forensics Inspection HUD (Overlay Drawer) */}
         {selectedNode && (
-          <div data-testid="forensics-hud" data-node-id={selectedNode.id} className="absolute top-4 right-4 bottom-4 w-96 max-w-[calc(100%-2rem)] bg-[#0a111e]/95 backdrop-blur-xl border border-outline-variant/30 rounded-2xl p-5 text-white shadow-2xl flex flex-col z-30 animate-in slide-in-from-right duration-200 overflow-y-auto">
+          <div data-testid="forensics-hud" data-node-id={selectedNode.id} className="absolute top-4 right-4 bottom-4 w-[410px] max-w-[calc(100%-2rem)] bg-white border border-slate-200 rounded-lg p-5 text-slate-900 shadow-lg flex flex-col z-30 overflow-y-auto">
             {/* Header */}
-            <div className="flex justify-between items-start pb-3 border-b border-white/10 mb-4">
+            <div className="flex justify-between gap-4 items-start pb-3 border-b border-slate-200 mb-4">
               <div className="flex items-center gap-2.5">
                 <div
-                  className={`p-2 rounded-xl ${
+                  className={`p-2 rounded-md ${
                     selectedNode.status === "offline"
-                      ? "bg-gray-500/20 text-gray-400"
+                      ? "bg-slate-100 text-slate-600"
                       : selectedNode.tampered
-                      ? "bg-error/20 text-error"
-                      : "bg-primary/20 text-primary"
+                      ? "bg-red-50 text-red-700"
+                      : "bg-slate-100 text-slate-600"
                   }`}
                 >
                   {selectedNode.status === "offline" ? (
@@ -538,42 +581,52 @@ function HolisticDashboardContent() {
                 <div>
                   <div className="flex items-center gap-1.5">
                     <CountryFlag code={selectedNode.geo.countryCode} className="w-4 h-3" />
-                    <h3 className="font-bold text-sm text-white truncate max-w-[170px]">{selectedNode.name}</h3>
+                    <h3 className="font-semibold text-sm text-slate-900 break-words max-w-[220px]">{selectedNode.name}</h3>
                   </div>
-                  <p className="text-[10px] text-on-surface-variant font-mono">{selectedNode.ip}</p>
+                  <p className="text-xs text-slate-500 font-mono">{selectedNode.ip}</p>
                 </div>
               </div>
               <button
                 onClick={() => selectNode(null)}
-                className="p-1 rounded-full hover:bg-white/10 text-on-surface-variant hover:text-white transition-colors cursor-pointer"
+                className="p-1 rounded-sm hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
                 aria-label="Close Forensics HUD"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
+            <div className="mb-4 border-b border-slate-200 pb-4" data-testid="node-project">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Project</p>
+              <p className="mt-1 break-words text-sm font-semibold text-slate-900">
+                {selectedProject.name || (selectedProject.id
+                  ? projectsLoading ? "Loading project…" : projectsFailed ? "Project details unavailable" : "Project name unavailable"
+                  : "Project not available")}
+              </p>
+              {selectedProject.id && <p className="mt-1 break-all font-mono text-xs text-slate-500">{selectedProject.id}</p>}
+            </div>
+
             {/* Status Alert Banner */}
             <div
-              className={`p-3 rounded-xl mb-3 border ${
+              className={`p-3 rounded-md mb-3 border ${
                 selectedNode.status === "offline"
-                  ? "bg-gray-800/40 border-gray-600/40 text-gray-300"
+                  ? "bg-slate-50 border-slate-200 text-slate-700"
                   : selectedNode.tampered
-                  ? "bg-error/15 border-error/30 text-error"
+                  ? "bg-red-50 border-red-200 text-red-800"
                   : selectedNode.status === "warning"
-                  ? "bg-amber-500/15 border-amber-500/30 text-amber-400"
-                  : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                  ? "bg-amber-50 border-amber-200 text-amber-800"
+                  : "bg-slate-50 border-slate-200 text-slate-700"
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-bold uppercase tracking-wider">
+                <span className="text-xs font-semibold uppercase tracking-wide">
                   {selectedNode.status === "offline"
                     ? (selectedNode.isolatedAt ? "Quarantined / Isolated" : "Offline / Heartbeat lost")
                     : selectedNode.tampered
-                    ? "🚨 Active Tamper Detected"
+                    ? "Active Tamper Detected"
                     : "Nominal Health"}
                 </span>
               </div>
-              <p className="text-[11px] leading-relaxed opacity-90">
+              <p className="text-xs leading-relaxed opacity-90">
                 {selectedNode.tamperReason ||
                   "Continuous telemetry active. No policy violations or canary triggers recorded."}
               </p>
@@ -583,7 +636,7 @@ function HolisticDashboardContent() {
             {hasActiveAlert && (
               <button
                 onClick={() => setIsBriefOpen(true)}
-                className="w-full mb-3 flex items-center justify-center gap-2 py-2.5 px-4 rounded-md text-xs font-semibold bg-[#294958] hover:bg-[#355b6a] text-white border border-[#527381] focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="w-full mb-3 flex items-center justify-center gap-2 py-2.5 px-4 rounded-md text-xs font-semibold bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <FileText className="w-4 h-4" />
                 <span>Explain this incident</span>
@@ -593,48 +646,48 @@ function HolisticDashboardContent() {
             {/* WHERE: Location, Physical Facility & Rack Placement */}
             <div className="space-y-3 flex-1 text-xs">
               <div>
-                <span className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-primary" /> WHERE (Physical & Cloud Location)
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-slate-600" /> Physical & Cloud Location
                 </span>
-                <div className="bg-white/5 rounded-xl p-3 mt-1 space-y-1.5 font-mono text-[11px]">
-                  <div className="flex justify-between items-center">
-                    <span className="text-on-surface-variant">Country:</span>
-                    <span className="text-white font-medium flex items-center gap-1">
+                <div className="border-t border-slate-200 py-3 mt-2 space-y-3 text-xs">
+                  <div className="flex justify-between gap-4 items-center">
+                    <span className="text-slate-500">Country:</span>
+                    <span className="text-slate-900 font-medium text-right break-words flex items-center gap-1">
                       <CountryFlag code={selectedNode.geo.countryCode} className="w-3.5 h-2.5" />
                       {selectedNode.geo.country}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">City / Coordinates:</span>
-                    <span className="text-white font-medium">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">City / Coordinates:</span>
+                    <span className="text-slate-900 font-medium text-right break-words">
                       {selectedNode.geo.city} ({selectedNode.geo.lat.toFixed(2)}, {selectedNode.geo.lng.toFixed(2)})
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Cloud Region / AZ:</span>
-                    <span className="text-primary-container font-medium">{selectedNode.geo.cloudRegion}</span>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Cloud Region / AZ:</span>
+                    <span className="text-slate-700 font-medium">{selectedNode.geo.cloudRegion}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Facility:</span>
-                    <span className="text-white font-medium">{selectedNode.facility.name}</span>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Facility:</span>
+                    <span className="text-slate-900 font-medium text-right break-words">{selectedNode.facility.name}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Floor / Rack / Unit:</span>
-                    <span className="text-emerald-400 font-bold">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Floor / Rack / Unit:</span>
+                    <span className="text-slate-700 font-semibold">
                       {selectedNode.placement.floorName.split(":")[0]} • {selectedNode.placement.rack} • {selectedNode.placement.unit}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center pt-1 border-t border-white/5">
-                    <span className="text-on-surface-variant flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-on-surface-variant" /> Site Local Time:
+                  <div className="flex justify-between gap-4 items-center pt-1 border-t border-slate-200">
+                    <span className="text-slate-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-500" /> Site Local Time:
                     </span>
-                    <span className="text-white font-mono font-bold">
+                    <span className="text-slate-900 font-mono font-medium">
                       {formatLocalTime(selectedNode.geo.timezone)}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-on-surface-variant">Compliance Standard:</span>
-                    <span className="text-xs font-bold text-amber-300">{selectedNode.geo.compliance}</span>
+                  <div className="flex justify-between gap-4 items-center">
+                    <span className="text-slate-500">Compliance Standard:</span>
+                    <span className="text-xs font-semibold text-slate-700">{selectedNode.geo.compliance}</span>
                   </div>
                 </div>
               </div>
@@ -642,27 +695,27 @@ function HolisticDashboardContent() {
               {/* HOW: Attack Vector & Simulated Attack Origin */}
               {selectedNode.incident && (
                 <div>
-                  <span className="text-[9px] font-bold text-error uppercase tracking-widest flex items-center gap-1">
-                    <Flame className="w-3 h-3" /> HOW (Attack Vector & Origin)
+                  <span className="text-xs font-semibold text-red-700 uppercase tracking-wide flex items-center gap-1">
+                    <Flame className="w-3 h-3" /> Attack Vector & Origin
                   </span>
-                  <div className="bg-error/10 border border-error/20 rounded-xl p-3 mt-1 space-y-1.5 text-[11px]">
-                    <p className="text-white font-medium leading-tight">
+                  <div className="bg-slate-50 border border-slate-200 rounded-md p-3 mt-1 space-y-3 text-xs">
+                    <p className="text-slate-900 font-medium text-right break-words leading-tight">
                       {selectedNode.incident.vector}
                     </p>
-                    {selectedNode.incident.attackOrigin && <><div className="flex justify-between items-center pt-1 border-t border-error/20 text-[10px] font-mono">
-                      <span className="text-on-surface-variant">Attack Origin:</span>
-                      <span className="text-error font-bold flex items-center gap-1">
+                    {selectedNode.incident.attackOrigin && <><div className="flex justify-between gap-4 items-center pt-1 border-t border-slate-200 text-xs font-mono tabular-nums">
+                      <span className="text-slate-500">Attack Origin:</span>
+                      <span className="text-red-700 font-semibold flex items-center gap-1">
                         <CountryFlag code={selectedNode.incident.attackOrigin.countryCode} className="w-3.5 h-2.5" />
                         {selectedNode.incident.attackOrigin.city}, {selectedNode.incident.attackOrigin.country}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center text-[10px] font-mono">
-                      <span className="text-on-surface-variant">Inbound IP:</span>
-                      <span className="text-white">{selectedNode.incident.attackOrigin.ip}</span>
+                    <div className="flex justify-between gap-4 items-center text-xs font-mono tabular-nums">
+                      <span className="text-slate-500">Inbound IP:</span>
+                      <span className="text-slate-900">{selectedNode.incident.attackOrigin.ip}</span>
                     </div></>}
-                    <div className="flex justify-between items-center text-[10px] font-mono">
-                      <span className="text-on-surface-variant">Detected At:</span>
-                      <span className="text-white">{selectedNode.incident.detectedAt}</span>
+                    <div className="flex justify-between gap-4 items-center text-xs font-mono tabular-nums">
+                      <span className="text-slate-500">Detected At:</span>
+                      <span className="text-slate-900">{selectedNode.incident.detectedAt}</span>
                     </div>
                   </div>
                 </div>
@@ -670,35 +723,35 @@ function HolisticDashboardContent() {
 
               {/* Telemetry Load */}
               <div>
-                <span className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                   Telemetry Load
                 </span>
-                <div className="bg-white/5 rounded-xl p-3 mt-1 space-y-2">
+                <div className="border-t border-slate-200 py-3 mt-2 space-y-2">
                   <div>
-                    <div className="flex justify-between text-[10px] text-on-surface-variant mb-1 font-mono">
+                    <div className="flex justify-between gap-4 text-xs text-slate-500 mb-1 font-mono">
                       <span>CPU Utilization</span>
-                      <span className={selectedNode.cpu > 80 ? "text-error font-bold" : "text-white"}>
+                      <span className={selectedNode.cpu > 80 ? "text-red-700 font-semibold" : "text-slate-900"}>
                         {selectedNode.cpu}%
                       </span>
                     </div>
-                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-slate-200 rounded-sm overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${selectedNode.cpu > 80 ? "bg-error" : "bg-primary"}`}
+                        className={`h-full rounded-sm ${selectedNode.cpu > 80 ? "bg-error" : "bg-slate-600"}`}
                         style={{ width: `${selectedNode.cpu}%` }}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-[10px] text-on-surface-variant mb-1 font-mono">
+                    <div className="flex justify-between gap-4 text-xs text-slate-500 mb-1 font-mono">
                       <span>Memory Allocation</span>
-                      <span className={selectedNode.memory > 80 ? "text-amber-400 font-bold" : "text-white"}>
+                      <span className={selectedNode.memory > 80 ? "text-amber-700 font-semibold" : "text-slate-900"}>
                         {selectedNode.memory}%
                       </span>
                     </div>
-                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-slate-200 rounded-sm overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${selectedNode.memory > 80 ? "bg-amber-400" : "bg-primary-container"}`}
+                        className={`h-full rounded-sm ${selectedNode.memory > 80 ? "bg-amber-400" : "bg-slate-500"}`}
                         style={{ width: `${selectedNode.memory}%` }}
                       />
                     </div>
@@ -708,14 +761,14 @@ function HolisticDashboardContent() {
             </div>
 
             {/* Containment Write Actions */}
-            <div className="mt-4 pt-3 border-t border-white/10 space-y-2">
+            <div className="mt-4 pt-3 border-t border-slate-200 space-y-2">
               <button
                 onClick={() => handleIsolateNode(selectedNode)}
                 disabled={Boolean(selectedNode.isolatedAt) || !canRespond}
-                className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-colors shadow-lg cursor-pointer ${
+                className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                   selectedNode.status === "offline"
-                    ? "bg-gray-700 text-gray-400 cursor-not-allowed"
-                    : "bg-error hover:bg-error/90 text-white shadow-error/20"
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                    : "bg-white hover:bg-red-50 text-red-700 border border-red-200 "
                 }`}
               >
                 <ShieldOff className="w-4 h-4" />
@@ -726,7 +779,7 @@ function HolisticDashboardContent() {
 
               <button
                 onClick={() => selectNode(null)}
-                className="w-full py-2 px-4 rounded-xl text-xs font-medium text-on-surface-variant hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                className="w-full py-2 px-4 rounded-md text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 Dismiss Inspector
               </button>
