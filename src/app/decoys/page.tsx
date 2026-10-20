@@ -8,7 +8,7 @@ import { nodeService } from "@/services/nodeService";
 import type { DecoyResponse, ServerResponse, NodeInventory } from "@/lib/types";
 import {
   Shield, FolderOpen, Eye, ShieldAlert, ShieldCheck,
-  RefreshCw, Loader2, AlertTriangle, FileCode, CheckCircle2, Lock, Ghost, Server
+  RefreshCw, Loader2, AlertTriangle, FileCode, CheckCircle2, Lock, Ghost, Server, RotateCcw
 } from "lucide-react";
 
 function getBasename(path: string): string {
@@ -87,7 +87,7 @@ export default function DecoysPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "planted" | "tampered" | "cleaned_up">("all");
-  const [hostFilter, setHostFilter] = useState<"all" | "online_tripped" | "online" | "offline">("online_tripped");
+  const [hostFilter, setHostFilter] = useState<"all" | "online_tripped" | "online" | "offline">("all");
 
   const loadDecoys = useCallback(async (isInitial = false) => {
     if (isInitial) {
@@ -253,11 +253,11 @@ export default function DecoysPage() {
         <span className="text-xs font-semibold text-on-surface-variant shrink-0">Host State:</span>
         {[
           {
-            id: "online_tripped",
-            label: `Online Tripped (${hostStats.onlineTripped})`,
-            icon: ShieldAlert,
-            activeClass: "bg-rose-600 text-white shadow-xs font-bold",
-            inactiveClass: "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100",
+            id: "all",
+            label: `All Hosts (${hostStats.total})`,
+            icon: Server,
+            activeClass: "bg-slate-800 text-white shadow-xs font-bold",
+            inactiveClass: "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high",
           },
           {
             id: "online",
@@ -274,11 +274,11 @@ export default function DecoysPage() {
             inactiveClass: "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200",
           },
           {
-            id: "all",
-            label: `All Hosts (${hostStats.total})`,
-            icon: Server,
-            activeClass: "bg-slate-800 text-white shadow-xs font-bold",
-            inactiveClass: "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high",
+            id: "online_tripped",
+            label: `Online and Tampered (${hostStats.onlineTripped})`,
+            icon: ShieldAlert,
+            activeClass: "bg-rose-600 text-white shadow-xs font-bold",
+            inactiveClass: "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100",
           },
         ].map((hf) => {
           const Icon = hf.icon;
@@ -299,25 +299,40 @@ export default function DecoysPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        {[
-          { id: "all", label: `ALL (${stats.total})` },
-          { id: "planted", label: `PLANTED (${stats.planted})` },
-          { id: "tampered", label: `TAMPERED (${stats.tampered})` },
-          { id: "cleaned_up", label: `CLEANED UP (${stats.cleanedUp})` },
-        ].map((tab) => (
+      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {[
+            { id: "all", label: `ALL (${stats.total})` },
+            { id: "planted", label: `PLANTED (${stats.planted})` },
+            { id: "tampered", label: `TAMPERED (${stats.tampered})` },
+            { id: "cleaned_up", label: `CLEANED UP (${stats.cleanedUp})` },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setFilter(tab.id as any)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all uppercase tracking-wider ${
+                filter === tab.id
+                  ? "bg-slate-800 text-white shadow-sm"
+                  : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {(filter !== "all" || hostFilter !== "all") && (
           <button
-            key={tab.id}
-            onClick={() => setFilter(tab.id as any)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all uppercase tracking-wider ${
-              filter === tab.id
-                ? "bg-slate-800 text-white shadow-sm"
-                : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
-            }`}
+            onClick={() => {
+              setFilter("all");
+              setHostFilter("all");
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+            title="Clear all applied filters"
           >
-            {tab.label}
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Clear filters</span>
           </button>
-        ))}
+        )}
       </div>
 
       {/* Main Grid */}
@@ -332,42 +347,24 @@ export default function DecoysPage() {
             <div className="text-center py-12 px-6 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
               <Shield className="w-10 h-10 text-on-surface-variant/30 mx-auto mb-3" />
               <h3 className="text-sm font-bold text-on-surface mb-1">
-                {hostFilter === "online_tripped"
-                  ? "No Online Tripped Decoys Found"
-                  : hostFilter === "online"
-                  ? "No Decoys on Online Hosts Found"
-                  : hostFilter === "offline"
-                  ? "No Decoys on Offline Hosts Found"
-                  : "No Decoy Assets Found"}
+                {hostFilter !== "all" || filter !== "all" ? "No decoys match these filters" : "No decoy assets found"}
               </h3>
               <p className="text-xs text-on-surface-variant max-w-sm mx-auto mb-4">
-                {hostFilter === "online_tripped"
-                  ? "No active tripwires have recorded unauthorized tampering on online hosts. Your online servers are secure."
-                  : "No honeypot files matching this filter. Plant decoy paths on your server to trap malicious actors."}
+                {hostFilter !== "all" || filter !== "all"
+                  ? "Clear the filters to see all decoys."
+                  : "Plant decoy paths on your server to monitor unauthorized access."}
               </p>
-              <div className="flex justify-center items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => setHostFilter("all")}
-                  className="text-xs font-bold px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all"
-                >
-                  Show All Decoys
-                </button>
-                <button
-                  onClick={() => setHostFilter("online")}
-                  className="text-xs font-bold px-3 py-1.5 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-all"
-                >
-                  View Online Hosts
-                </button>
+              {(hostFilter !== "all" || filter !== "all") && (
                 <button
                   onClick={() => {
                     setFilter("all");
                     setHostFilter("all");
                   }}
-                  className="text-xs font-bold px-3 py-1.5 bg-surface-container-high text-on-surface rounded-lg hover:bg-surface-container-highest transition-all"
+                  className="text-xs font-bold px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
                 >
-                  Reset All Filters
+                  Clear filters
                 </button>
-              </div>
+              )}
             </div>
           ) : (
             filteredItems.map((d) => {

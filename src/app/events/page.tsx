@@ -6,7 +6,7 @@ import {
   AlertTriangle, Filter, Search, Clock, ChevronDown,
   Info, Loader2, Server, ShieldCheck, Crosshair,
   ShieldAlert, Copy, Check, Terminal, Activity,
-  RefreshCw, Layers
+  RefreshCw, Layers, RotateCcw
 } from "lucide-react";
 import { dashboardService } from "@/services/dashboardService";
 import { serverService } from "@/services/serverService";
@@ -419,6 +419,19 @@ export default function EventsPage() {
             {f}
           </button>
         ))}
+        {(searchQuery || filter !== "All") && (
+          <button
+            onClick={() => {
+              setSearchQuery("");
+              setFilter("All");
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+            title="Clear all filters"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Clear filters</span>
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-2 text-xs text-on-surface-variant">
           <Layers className="w-3.5 h-3.5 text-primary" />
           <span className="font-mono text-[11px] font-semibold">{filteredEvents.length} Signals</span>
@@ -441,6 +454,18 @@ export default function EventsPage() {
                 ? "No events match the current filter or search criteria. Try modifying your filter options."
                 : "There are no live security events registered on your tenant yet. Active agents will stream telemetry events here in real-time."}
             </p>
+            {(searchQuery || filter !== "All") && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setFilter("All");
+                }}
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Clear filters</span>
+              </button>
+            )}
           </div>
         ) : (
           filteredEvents.map((e, idx) => {

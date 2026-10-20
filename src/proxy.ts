@@ -20,6 +20,12 @@ export function proxy(request: NextRequest) {
   const token = request.cookies.get("sentinel_token")?.value;
 
   if (!token) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { detail: "Authentication required" },
+        { status: 401 }
+      );
+    }
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }

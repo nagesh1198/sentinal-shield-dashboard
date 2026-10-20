@@ -15,7 +15,7 @@ import {
   RefreshCw, Loader2, AlertTriangle, ShieldCheck, Lock,
   Shield, ShieldAlert, Sparkles, FileCode, ChevronDown,
   ChevronUp, Copy, Check, Filter, Layers, Search, LayoutGrid,
-  Table as TableIcon, Radio, CheckCircle2
+  Table as TableIcon, Radio, CheckCircle2, X
 } from "lucide-react";
 import { usePermissions } from "@/lib/rbac";
 import { DynamicResourceWave } from "@/components/DynamicResourceWave";
@@ -143,9 +143,10 @@ export default function InfrastructurePage() {
   const [decoyServerFilter, setDecoyServerFilter] = useState<string>("ALL");
   const [decoyTypeFilter, setDecoyTypeFilter] = useState<string>("ALL");
   const [decoyStatusFilter, setDecoyStatusFilter] = useState<string>("ALL");
-  const [decoyHostFilter, setDecoyHostFilter] = useState<"ALL" | "ONLINE" | "OFFLINE" | "ONLINE_TRIPPED">("ONLINE_TRIPPED");
+  const [decoyHostFilter, setDecoyHostFilter] = useState<"ALL" | "ONLINE" | "OFFLINE" | "ONLINE_TRIPPED">("ALL");
   const [decoySearch, setDecoySearch] = useState<string>("");
   const [decoyViewMode, setDecoyViewMode] = useState<"table" | "grid">("table");
+  const [showMoreDecoyFilters, setShowMoreDecoyFilters] = useState(false);
 
   // URL query parameter synchronization
   useEffect(() => {
@@ -462,6 +463,11 @@ export default function InfrastructurePage() {
     return list;
   }, [unifiedServers]);
 
+  const decoyTypes = useMemo(() =>
+    Array.from(new Set(allPlantedDecoys.map(({ decoy }) => decoy.decoy_type).filter(Boolean))).sort(),
+    [allPlantedDecoys]
+  );
+
   // Decoy Status Statistics (exact counts for planted, tampered, cleaned_up)
   const decoyStats = useMemo(() => {
     let planted = 0;
@@ -492,6 +498,17 @@ export default function InfrastructurePage() {
   ).length;
   const onlineDecoysCount = allPlantedDecoys.filter(({ server }) => server.isOnline).length;
   const offlineDecoysCount = allPlantedDecoys.filter(({ server }) => !server.isOnline).length;
+  const activeDecoyFilters = decoyServerFilter !== "ALL" || decoyTypeFilter !== "ALL" ||
+    decoyStatusFilter !== "ALL" || decoyHostFilter !== "ALL" || decoySearch.trim() !== "";
+  const advancedDecoyFilterCount = Number(decoyTypeFilter !== "ALL") + Number(decoyHostFilter !== "ALL");
+
+  const clearDecoyFilters = () => {
+    setDecoyServerFilter("ALL");
+    setDecoyTypeFilter("ALL");
+    setDecoyStatusFilter("ALL");
+    setDecoyHostFilter("ALL");
+    setDecoySearch("");
+  };
 
   // Filtered decoys list
   const filteredPlantedDecoys = useMemo(() => {
@@ -533,6 +550,21 @@ export default function InfrastructurePage() {
       return true;
     });
   }, [allPlantedDecoys, decoyHostFilter, decoyServerFilter, decoyTypeFilter, decoyStatusFilter, decoySearch]);
+
+  const selectedDecoyServer = unifiedServers.find((server) => server.serverId === decoyServerFilter);
+  const selectedStatusDescription: Record<string, string> = {
+    ALL: "",
+    planted: "planted ",
+    tampered: "tampered ",
+    cleaned_up: "cleaned-up ",
+    pending: "pending ",
+  };
+  const selectedHostDescription: Record<typeof decoyHostFilter, string> = {
+    ALL: "from all hosts",
+    ONLINE: "from online hosts",
+    OFFLINE: "from offline hosts",
+    ONLINE_TRIPPED: "from online hosts with tampered decoys",
+  };
 
   return (
     <DashboardLayout>
@@ -681,6 +713,16 @@ export default function InfrastructurePage() {
               <Shield className="w-3 h-3 text-slate-500" />
               With Decoys ({unifiedServers.filter((s) => s.plantedDecoys.length > 0).length})
             </button>
+            {serverFilterMode !== "all" && (
+              <button
+                onClick={() => setServerFilterMode("all")}
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer ml-auto"
+                title="Clear filter"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Clear filter</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1087,196 +1129,173 @@ export default function InfrastructurePage() {
 
           {/* Planted Decoys Filter & Controls Bar */}
           <div className="bg-white rounded-2xl p-4 border border-outline-variant/10 shadow-sm space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              {/* Search Bar */}
-              <div className="relative flex-1 min-w-[240px]">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[220px]">
                 <Search className="w-4 h-4 text-on-surface-variant/50 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  type="text"
-                  placeholder="Search planted decoys by file path or hostname..."
+                  type="search"
+                  aria-label="Search decoys"
+                  placeholder="Search file path or server..."
                   value={decoySearch}
                   onChange={(e) => setDecoySearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none focus:border-primary font-mono"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none focus:border-primary"
                 />
               </div>
-
-              {/* Server Filter Dropdown */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-on-surface-variant shrink-0">Server:</span>
-                <select
-                  value={decoyServerFilter}
-                  onChange={(e) => setDecoyServerFilter(e.target.value)}
-                  className="text-xs py-1.5 px-3 bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none font-medium"
-                >
-                  <option value="ALL">All Servers ({unifiedServers.length})</option>
-                  {unifiedServers.map((s) => (
-                    <option key={s.serverId} value={s.serverId}>
-                      {s.hostname} {s.isOnline ? "(Online)" : "(Offline)"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Host Connectivity & Tripped Filter */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs font-semibold text-on-surface-variant shrink-0 mr-1">Host State:</span>
-                {[
-                  {
-                    id: "ONLINE_TRIPPED",
-                    label: `ONLINE TRIPPED (${onlineTrippedDecoysCount})`,
-                    icon: ShieldAlert,
-                    activeClass: "bg-rose-600 text-white shadow-xs font-bold",
-                    inactiveClass: "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100",
-                  },
-                  {
-                    id: "ONLINE",
-                    label: `ONLINE HOSTS (${onlineDecoysCount})`,
-                    icon: CheckCircle2,
-                    activeClass: "bg-emerald-700 text-white shadow-xs font-bold",
-                    inactiveClass: "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100",
-                  },
-                  {
-                    id: "OFFLINE",
-                    label: `OFFLINE HOSTS (${offlineDecoysCount})`,
-                    icon: Shield,
-                    activeClass: "bg-slate-700 text-white shadow-xs font-bold",
-                    inactiveClass: "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200",
-                  },
-                  {
-                    id: "ALL",
-                    label: `ALL HOSTS (${allPlantedDecoys.length})`,
-                    icon: Server,
-                    activeClass: "bg-slate-800 text-white shadow-xs font-bold",
-                    inactiveClass: "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high",
-                  },
-                ].map((hf) => {
-                  const Icon = hf.icon;
-                  const isActive = decoyHostFilter === hf.id;
-                  return (
-                    <button
-                      key={hf.id}
-                      onClick={() => setDecoyHostFilter(hf.id as any)}
-                      className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md font-bold uppercase transition-all ${
-                        isActive ? hf.activeClass : hf.inactiveClass
-                      }`}
-                    >
-                      <Icon className="w-3 h-3" />
-                      <span>{hf.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Status Filter: exact statuses (All, Planted, Tampered, Cleaned Up) */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {[
-                  { id: "ALL", label: `ALL (${decoyStats.total})` },
-                  { id: "planted", label: `PLANTED (${decoyStats.planted})` },
-                  { id: "tampered", label: `TAMPERED (${decoyStats.tampered})` },
-                  { id: "cleaned_up", label: `CLEANED UP (${decoyStats.cleanedUp})` },
-                ].map((st) => (
-                  <button
-                    key={st.id}
-                    onClick={() => setDecoyStatusFilter(st.id)}
-                    className={`text-[11px] px-2.5 py-1 rounded-md font-bold uppercase transition-all ${
-                      decoyStatusFilter === st.id
-                        ? "bg-slate-800 text-white shadow-xs"
-                        : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
-                    }`}
-                  >
-                    {st.label}
-                  </button>
+              <select
+                aria-label="Filter decoys by server"
+                value={decoyServerFilter}
+                onChange={(e) => setDecoyServerFilter(e.target.value)}
+                className="max-w-full text-xs py-2 px-3 bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none font-medium"
+              >
+                <option value="ALL">All servers</option>
+                {unifiedServers.map((s) => (
+                  <option key={s.serverId} value={s.serverId}>{s.hostname}</option>
                 ))}
-              </div>
-
-              {/* View Switcher */}
-              <div className="flex items-center gap-1 border-l border-outline-variant/15 pl-3">
+              </select>
+              <div className="flex items-center gap-1 ml-auto" aria-label="Decoy view">
                 <button
                   onClick={() => setDecoyViewMode("table")}
-                  className={`p-1.5 rounded-md ${
-                    decoyViewMode === "table" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"
-                  }`}
-                  title="Table View"
+                  className={`p-2 rounded-md ${decoyViewMode === "table" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"}`}
+                  title="Table view"
+                  aria-label="Table view"
+                  aria-pressed={decoyViewMode === "table"}
                 >
                   <TableIcon className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setDecoyViewMode("grid")}
-                  className={`p-1.5 rounded-md ${
-                    decoyViewMode === "grid" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"
-                  }`}
-                  title="Cards Grid View"
+                  className={`p-2 rounded-md ${decoyViewMode === "grid" ? "bg-primary text-white" : "bg-surface-container-low text-on-surface-variant"}`}
+                  title="Grid view"
+                  aria-label="Grid view"
+                  aria-pressed={decoyViewMode === "grid"}
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
-            {/* Quick Type Filter Chips */}
-            <div className="flex items-center gap-2 pt-2 border-t border-outline-variant/10 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/70">
-                Decoy Types:
-              </span>
-              {(["ALL", "FILE_TRIPWIRE", "HONEYTOKEN", "SSH_TRAP"] as const).map((typ) => (
+            <div className="flex items-center gap-2 flex-wrap border-t border-outline-variant/10 pt-3">
+              <span className="text-xs font-semibold text-on-surface-variant mr-1">Status</span>
+              {[
+                { id: "ALL", label: `ALL (${decoyStats.total})` },
+                { id: "planted", label: `PLANTED (${decoyStats.planted})` },
+                { id: "tampered", label: `TAMPERED (${decoyStats.tampered})` },
+                { id: "cleaned_up", label: `CLEANED UP (${decoyStats.cleanedUp})` },
+                ...(decoyStats.pending > 0 ? [{ id: "pending", label: `PENDING (${decoyStats.pending})` }] : []),
+              ].map((st) => (
                 <button
-                  key={typ}
-                  onClick={() => setDecoyTypeFilter(typ)}
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-mono transition-all ${
-                    decoyTypeFilter === typ
-                      ? "bg-slate-200 text-slate-900 border border-slate-400 font-bold"
+                  key={st.id}
+                  onClick={() => setDecoyStatusFilter(st.id)}
+                  aria-pressed={decoyStatusFilter === st.id}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${
+                    decoyStatusFilter === st.id
+                      ? "bg-slate-800 text-white"
                       : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
                   }`}
                 >
-                  {typ}
+                  {st.label}
                 </button>
               ))}
+              <div className="ml-auto flex items-center gap-2">
+                {activeDecoyFilters && (
+                  <button
+                    onClick={clearDecoyFilters}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                    title="Clear all applied filters"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Clear filters</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowMoreDecoyFilters((open) => !open)}
+                  aria-expanded={showMoreDecoyFilters}
+                  aria-controls="more-decoy-filters"
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary px-2.5 py-1.5 rounded-lg hover:bg-surface-container-low transition-colors"
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  More filters{advancedDecoyFilterCount > 0 ? ` (${advancedDecoyFilterCount})` : ""}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showMoreDecoyFilters ? "rotate-180" : ""}`} />
+                </button>
+              </div>
+            </div>
+
+            {showMoreDecoyFilters && (
+              <div id="more-decoy-filters" className="flex items-end gap-3 flex-wrap border-t border-outline-variant/10 pt-3">
+                <label className="flex flex-col gap-1 text-xs font-semibold text-on-surface-variant">
+                  Host state
+                  <select
+                    value={decoyHostFilter}
+                    onChange={(e) => setDecoyHostFilter(e.target.value as typeof decoyHostFilter)}
+                    className="text-xs py-2 px-3 bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none text-on-surface"
+                  >
+                    <option value="ALL">All hosts</option>
+                    <option value="ONLINE">Online ({onlineDecoysCount})</option>
+                    <option value="OFFLINE">Offline ({offlineDecoysCount})</option>
+                    <option value="ONLINE_TRIPPED">Online and tampered ({onlineTrippedDecoysCount})</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-on-surface-variant">
+                  Decoy type
+                  <select
+                    value={decoyTypeFilter}
+                    onChange={(e) => setDecoyTypeFilter(e.target.value)}
+                    className="text-xs py-2 px-3 bg-surface-container-low rounded-lg border border-outline-variant/15 focus:outline-none text-on-surface"
+                  >
+                    <option value="ALL">All types</option>
+                    {decoyTypes.map((type) => (
+                      <option key={type} value={type}>{type.replaceAll("_", " ")}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 flex-wrap border-t border-outline-variant/10 pt-3 text-xs text-on-surface-variant" aria-live="polite">
+              <p>
+                Showing <strong className="text-on-surface">
+                  {filteredPlantedDecoys.length} {selectedStatusDescription[decoyStatusFilter] || ""}decoy{filteredPlantedDecoys.length === 1 ? "" : "s"}
+                </strong>{" "}
+                {selectedHostDescription[decoyHostFilter]} {selectedDecoyServer
+                  ? `on ${selectedDecoyServer.hostname}`
+                  : "across all servers"}, {decoyTypeFilter === "ALL"
+                  ? "of all types"
+                  : `of type ${decoyTypeFilter.replaceAll("_", " ").toLowerCase()}`}
+                {decoySearch.trim() && <> matching <strong className="text-on-surface">“{decoySearch.trim()}”</strong></>}.
+              </p>
+              {activeDecoyFilters && (
+                <button onClick={clearDecoyFilters} className="font-semibold text-primary hover:underline">
+                  Clear filters
+                </button>
+              )}
             </div>
           </div>
 
           {/* Planted Decoys List / Table */}
-          {filteredPlantedDecoys.length === 0 ? (
+          {loading && allPlantedDecoys.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
+              <Loader2 className="w-6 h-6 text-primary animate-spin mb-2" />
+              <p className="text-xs text-on-surface-variant">Loading decoys...</p>
+            </div>
+          ) : filteredPlantedDecoys.length === 0 ? (
             <div className="text-center py-12 px-6 bg-white rounded-2xl border border-outline-variant/10 shadow-sm">
               <Shield className="w-10 h-10 text-on-surface-variant/30 mx-auto mb-3" />
               <h3 className="text-sm font-bold text-on-surface mb-1">
-                {decoyHostFilter === "ONLINE_TRIPPED"
-                  ? "No Online Tripped Decoys Found"
-                  : decoyHostFilter === "ONLINE"
-                  ? "No Decoys on Online Hosts Found"
-                  : decoyHostFilter === "OFFLINE"
-                  ? "No Decoys on Offline Hosts Found"
-                  : "No Planted Decoys Found"}
+                {activeDecoyFilters ? "No decoys match these filters" : "No decoys found"}
               </h3>
               <p className="text-xs text-on-surface-variant max-w-sm mx-auto mb-4">
-                {decoyHostFilter === "ONLINE_TRIPPED"
-                  ? "No active tripwires have recorded unauthorized tampering on online hosts. Your online servers are secure."
-                  : "No decoys matched the current filter. Try resetting the filters or switching host state."}
+                {activeDecoyFilters
+                  ? "Try another search or clear the filters to see all decoys."
+                  : "No decoys are currently available in this inventory."}
               </p>
-              <div className="flex justify-center items-center gap-2 flex-wrap">
+              {activeDecoyFilters && (
                 <button
-                  onClick={() => setDecoyHostFilter("ALL")}
-                  className="text-xs font-bold px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all"
+                  onClick={clearDecoyFilters}
+                  className="text-xs font-bold px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
                 >
-                  Show All Decoys
+                  Clear filters
                 </button>
-                <button
-                  onClick={() => setDecoyHostFilter("ONLINE")}
-                  className="text-xs font-bold px-3 py-1.5 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-all"
-                >
-                  View Online Hosts
-                </button>
-                <button
-                  onClick={() => {
-                    setDecoyServerFilter("ALL");
-                    setDecoyTypeFilter("ALL");
-                    setDecoyStatusFilter("ALL");
-                    setDecoyHostFilter("ALL");
-                    setDecoySearch("");
-                  }}
-                  className="text-xs font-bold px-3 py-1.5 bg-surface-container-high text-on-surface rounded-lg hover:bg-surface-container-highest transition-all"
-                >
-                  Reset All Filters
-                </button>
-              </div>
+              )}
             </div>
           ) : decoyViewMode === "table" ? (
             /* Matrix Table View */
