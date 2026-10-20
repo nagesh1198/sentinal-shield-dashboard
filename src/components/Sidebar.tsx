@@ -38,7 +38,7 @@ export function Sidebar({ isOpen }: { isOpen: boolean }) {
 
   const linkClass = (href: string) => {
     const active = pathname === href;
-    const base = `rounded-full py-3 flex items-center transition-all duration-300 ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`;
+    const base = `rounded-full py-3 flex items-center transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:translate-x-0.5 active:scale-[0.98] motion-reduce:transition-none ${isOpen ? "mx-2 px-6 gap-4" : "mx-4 px-0 justify-center w-12 h-12"}`;
     return active
       ? `${base} bg-primary text-white shadow-lg shadow-primary/20`
       : `${base} text-on-surface-variant hover:text-primary hover:bg-surface-container-high`;

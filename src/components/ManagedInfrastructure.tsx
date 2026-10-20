@@ -151,21 +151,21 @@ export function ManagedInfrastructure() {
       setError(null);
     }
     Promise.all([
-      nodeService.getNodes().catch(() => [] as NodeInventory[]),
-      serverService.listServers().catch(() => [] as ServerResponse[]),
-      agentService.listAgents().catch(() => [] as AgentRegistryResponse[]),
-      agentService.getAgents().catch(() => [] as AgentResponse[]),
-      decoyService.listDecoys().catch(() => [] as DecoyResponse[]),
+      nodeService.getNodes().catch(() => null),
+      serverService.listServers().catch(() => null),
+      agentService.listAgents().catch(() => null),
+      agentService.getAgents().catch(() => null),
+      decoyService.listDecoys().catch(() => null),
     ])
       .then(([nodesData, serversData, regAgents, dashAgents, decoysData]) => {
-        setNodes(Array.isArray(nodesData) ? nodesData : []);
-        setServers(Array.isArray(serversData) ? serversData : []);
+        if (Array.isArray(nodesData)) setNodes(nodesData);
+        if (Array.isArray(serversData)) setServers(serversData);
         const combinedAgents = [
           ...(Array.isArray(regAgents) ? regAgents : []),
           ...(Array.isArray(dashAgents) ? dashAgents : []),
         ];
-        setAgents(combinedAgents);
-        setDecoys(Array.isArray(decoysData) ? decoysData : []);
+        if (Array.isArray(regAgents) && Array.isArray(dashAgents)) setAgents(combinedAgents);
+        if (Array.isArray(decoysData)) setDecoys(decoysData);
         if (!silent) setLoading(false);
       })
       .catch((err) => {
@@ -380,9 +380,9 @@ export function ManagedInfrastructure() {
   const totalDecoysPlanted = mergedServersList.reduce((acc, s) => acc + s.plantedDecoys.length, 0);
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3 h-[252px] max-h-[252px] min-h-[252px] flex flex-col">
       {/* Header with Online Servers Metric & Decoys Summary */}
-      <div className="flex justify-between items-center flex-wrap gap-2">
+      <div className="flex justify-between items-center flex-wrap gap-2 shrink-0">
         <div className="flex items-center gap-3">
           <h2 className="text-base font-headline font-bold text-primary">
             Managed Infrastructure
@@ -411,13 +411,13 @@ export function ManagedInfrastructure() {
       </div>
 
       {error && (
-        <div className="text-xs text-error bg-error-container/15 border border-error/15 rounded-lg px-3 py-2">
+        <div className="text-xs text-error bg-error-container/15 border border-error/15 rounded-lg px-3 py-2 shrink-0">
           Failed to load infrastructure telemetry: {error}
         </div>
       )}
 
       {/* Merged Servers List */}
-      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1.5">
+      <div className="space-y-2.5 h-52 flex-1 overflow-y-auto overscroll-contain pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.3)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400 [&::-webkit-scrollbar-thumb]:rounded-full">
         {loading && mergedServersList.length === 0 && (
           <div className="flex items-center justify-center py-8 text-on-surface-variant">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />

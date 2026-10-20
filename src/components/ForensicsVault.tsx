@@ -42,7 +42,7 @@ export function ForensicsVault() {
       })
       .catch((err) => {
         console.error("Forensics Vault load error:", err);
-        setError(err.message);
+        if (!silent) setError(err.message);
         if (!silent) setLoading(false);
       });
   }, []);
@@ -64,7 +64,7 @@ export function ForensicsVault() {
         </h3>
       </div>
 
-      <div className="space-y-1.5 min-h-[5.5rem] flex flex-col justify-center">
+      <div className="space-y-1.5 h-40 overflow-y-auto overscroll-contain flex flex-col justify-start">
         {loading ? (
           <div className="flex items-center justify-center py-4">
             <Loader2 className="w-4 h-4 text-primary animate-spin mr-2" />

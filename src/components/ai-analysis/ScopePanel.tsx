@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Calendar,
+  ChevronDown,
   Database,
   Filter,
   FolderKanban,
@@ -11,6 +12,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Server,
   Sparkles,
 } from "lucide-react";
@@ -69,8 +71,33 @@ export function ScopePanel({
 }: Props) {
   const [showSqlEditor, setShowSqlEditor] = useState(false);
   const [analysisPrompt, setAnalysisPrompt] = useState("");
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
+  const projectPickerRef = useRef<HTMLDivElement>(null);
+  const projectTriggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!projectPickerRef.current?.contains(event.target as Node)) {
+        setProjectMenuOpen(false);
+        setProjectSearch("");
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [projectMenuOpen]);
 
   const set = (patch: Partial<ScopeState>) => onChange({ ...scope, ...patch });
+  const selectProject = (projectId: string) => {
+    set({
+      projectId,
+      serverIds: servers.filter((server) => server.project_id === projectId).map((server) => server.id),
+      customSql: "",
+    });
+    setProjectMenuOpen(false);
+    setProjectSearch("");
+  };
   const toggleSource = (s: (typeof SOURCES)[number]) =>
     set({
       sources: scope.sources.includes(s)
@@ -79,6 +106,14 @@ export function ScopePanel({
     });
 
   const selectedProject = projects.find((p) => p.id === scope.projectId);
+  const projectQuery = projectSearch.trim().toLowerCase();
+  const filteredProjects = projectQuery
+    ? projects.filter((project) =>
+        [project.name, project.description ?? "", project.id].some((value) =>
+          value.toLowerCase().includes(projectQuery)
+        )
+      )
+    : projects;
   const hostnames = scope.serverIds.map(
     (id) => servers.find((s) => s.id === id)?.hostname ?? id
   );
@@ -245,29 +280,73 @@ export function ScopePanel({
             )}
           </div>
         ) : (
-          <div>
-            <select
-              value={scope.projectId}
-              onChange={(e) => {
-                const nextId = e.target.value;
-                set({
-                  projectId: nextId,
-                  // Auto-filter servers belonging to this project
-                  serverIds: servers
-                    .filter((s) => s.project_id === nextId)
-                    .map((s) => s.id),
-                  customSql: "", // reset custom SQL to regenerate for new project
-                });
+          <div ref={projectPickerRef} onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setProjectMenuOpen(false);
+              setProjectSearch("");
+              projectTriggerRef.current?.focus();
+            }
+          }}>
+            <button
+              ref={projectTriggerRef}
+              type="button"
+              aria-label="Project"
+              aria-expanded={projectMenuOpen}
+              aria-controls="analysis-project-options"
+              onClick={() => {
+                setProjectMenuOpen((open) => !open);
+                setProjectSearch("");
               }}
-              className={fieldClass}
+              className={`${fieldClass} flex items-center justify-between gap-2 text-left`}
             >
-              <option value="">-- Select a project --</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} {p.description ? `(${p.description})` : ""}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0 flex-1 truncate">{selectedProject?.name ?? "-- Select a project --"}</span>
+              <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${projectMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+            {projectMenuOpen && (
+              <div
+                id="analysis-project-options"
+                className="mt-1 rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-1"
+              >
+                <div className="flex items-center gap-2 rounded-lg border border-outline-variant/30 px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-primary/40">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" />
+                  <input
+                    type="search"
+                    aria-label="Search projects"
+                    placeholder="Search projects"
+                    value={projectSearch}
+                    onChange={(event) => setProjectSearch(event.target.value)}
+                    autoFocus
+                    className="min-w-0 flex-1 bg-transparent text-xs text-on-surface outline-none placeholder:text-on-surface-variant/60"
+                  />
+                </div>
+                <div className="mt-1 max-h-36 space-y-0.5 overflow-y-auto overscroll-contain">
+                  {!projectQuery && (
+                    <button
+                      type="button"
+                      onClick={() => selectProject("")}
+                      className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-on-surface-variant hover:bg-surface-container-low focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    >
+                      -- Select a project --
+                    </button>
+                  )}
+                  {filteredProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      aria-pressed={scope.projectId === project.id}
+                      onClick={() => selectProject(project.id)}
+                      className={`w-full rounded-lg px-2.5 py-2 text-left hover:bg-surface-container-low focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${scope.projectId === project.id ? "bg-primary/10 text-primary" : "text-on-surface"}`}
+                    >
+                      <span className="block break-words text-xs font-semibold">{project.name}</span>
+                      {project.description && <span className="mt-0.5 block break-words text-[10px] text-on-surface-variant">{project.description}</span>}
+                    </button>
+                  ))}
+                  {filteredProjects.length === 0 && (
+                    <p className="px-2.5 py-3 text-center text-xs text-on-surface-variant">No matching projects</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {selectedProject && (
               <div className="mt-1 flex items-center justify-between text-[10px] text-on-surface-variant px-1 font-mono">

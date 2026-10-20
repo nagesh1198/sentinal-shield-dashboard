@@ -66,7 +66,7 @@ export function DetectionHeatmap() {
   const hasData = cells.length > 0;
 
   return (
-    <div className="bg-tertiary rounded-xl p-5 text-white mt-4 shadow-lg">
+    <div className="bg-tertiary rounded-xl p-5 text-white shadow-lg">
       <div className="flex justify-between items-center mb-4">
         <h3 className="font-headline font-bold text-base">
           Detection Risk Scoring

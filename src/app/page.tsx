@@ -216,36 +216,39 @@ export default function Home() {
         <SummaryBoxes />
       </div>
 
-      <div className="grid grid-cols-12 gap-6 items-start">
-        <section className="col-span-8 flex flex-col gap-6">
-          <div data-tour="infrastructure">
-            <ManagedInfrastructure />
-          </div>
+      {/* Operational Layer: Managed Infrastructure & Live Event Stream */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 mb-8 lg:mb-10 items-stretch">
+        <div className="min-w-0 lg:col-span-8 flex flex-col" data-tour="infrastructure">
+          <ManagedInfrastructure />
+        </div>
+        <div className="min-w-0 lg:col-span-4 flex flex-col" data-tour="events">
+          <EventStream />
+        </div>
+      </div>
+
+      {/* Detection & Forensics Layer */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
+        <section className="min-w-0 flex flex-col gap-6 lg:col-span-8">
           <div data-tour="heatmap">
             <DetectionHeatmap />
           </div>
-        </section>
-        <section className="col-span-4 flex flex-col gap-6">
-          <div data-tour="events">
-            <EventStream />
+          <div className="flex gap-8 border-t border-outline-variant/15 pt-4 pb-4">
+            <div>
+              <p className="text-[9px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-0.5">Total Datapoints</p>
+              <p className="text-base font-bold text-primary">4.2M / day</p>
+            </div>
+            <div>
+              <p className="text-[9px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-0.5">Ingestion Lag</p>
+              <p className="text-base font-bold text-primary">42ms</p>
+            </div>
           </div>
-          <div data-tour="forensics">
-            <ForensicsVault />
-          </div>
         </section>
+        <div className="min-w-0 lg:col-span-4" data-tour="forensics">
+          <ForensicsVault />
+        </div>
       </div>
 
-      <footer className="mt-6 pt-4 border-t border-outline-variant/15 flex justify-between items-center pb-4">
-        <div className="flex gap-8">
-          <div>
-            <p className="text-[9px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-0.5">Total Datapoints</p>
-            <p className="text-base font-bold text-primary">4.2M / day</p>
-          </div>
-          <div>
-            <p className="text-[9px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-0.5">Ingestion Lag</p>
-            <p className="text-base font-bold text-primary">42ms</p>
-          </div>
-        </div>
+      <footer className="mt-6 pt-4 border-t border-outline-variant/15 flex justify-end items-center pb-4">
         <div className="flex items-center gap-3 text-on-surface-variant text-[10px] font-medium">
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />

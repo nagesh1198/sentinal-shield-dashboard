@@ -78,19 +78,29 @@ export function EventStream() {
   };
 
   return (
-    <div className="bg-surface-container-lowest rounded-xl p-4 shadow-[0px_12px_32px_rgba(0,27,133,0.06)] flex flex-col border border-outline-variant/10">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-base font-headline font-bold text-primary">
-          Live Event Stream
-        </h2>
-        <span
-          className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-error"} animate-pulse`}
-          title={connected ? "SSE Connected" : "Polling mode"}
-        />
+    <div className="bg-surface-container-lowest rounded-xl p-4 shadow-[0px_12px_32px_rgba(0,27,133,0.06)] flex flex-col border border-outline-variant/10 h-[252px] max-h-[252px] min-h-[252px] overflow-hidden">
+      <div className="flex justify-between items-center mb-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-headline font-bold text-primary">
+            Live Event Stream
+          </h2>
+          <span className="text-[10px] font-mono font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+            {events.length} events
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-error"} animate-pulse`}
+            title={connected ? "SSE Connected" : "Polling mode"}
+          />
+          <span className="text-[10px] font-medium text-slate-400">
+            {connected ? "Live" : "Polling"}
+          </span>
+        </div>
       </div>
       <div
         ref={containerRef}
-        className="space-y-3 overflow-y-auto pr-1 max-h-64"
+        className="space-y-2.5 overflow-y-auto overscroll-contain pr-2 flex-1 min-h-0 h-[184px] max-h-[184px] [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.3)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400 [&::-webkit-scrollbar-thumb]:rounded-full"
       >
         {events.length === 0 && (
           <p className="text-xs text-on-surface-variant/60 text-center py-4">
